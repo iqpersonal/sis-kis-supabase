@@ -308,6 +308,124 @@ export interface SummarySchoolData {
       absenceDays: number;
     }[];
   };
+  attendance_detail: {
+    total_absence_days: number;
+    total_tardy: number;
+    students_with_absences: number;
+    students_with_tardy: number;
+    avg_absence_per_student: number;
+    avg_tardy_per_student: number;
+    top_absentees: { studentNumber: string; days: number; className: string }[];
+    absence_by_class: {
+      classCode: string;
+      className: string;
+      students: number;
+      absenceDays: number;
+      tardyCount: number;
+      avgAbsence: number;
+    }[];
+    tardy_by_class: { classCode: string; className: string; count: number }[];
+  };
+  delinquency: {
+    total_charged: number;
+    total_paid: number;
+    total_outstanding: number;
+    total_discount: number;
+    collection_rate: number;
+    students_fully_paid: number;
+    students_with_balance: number;
+    students_zero_paid: number;
+    balance_by_installment: {
+      term: number;
+      label: string;
+      outstanding: number;
+      charged: number;
+      rate: number;
+    }[];
+    balance_by_class: {
+      classCode: string;
+      className: string;
+      outstanding: number;
+      charged: number;
+      rate: number;
+    }[];
+    top_delinquents: {
+      studentNumber: string;
+      charged: number;
+      paid: number;
+      balance: number;
+      className: string;
+    }[];
+  };
+  subject_performance: {
+    subjects: {
+      name: string;
+      avg: number;
+      min: number;
+      max: number;
+      sectionCount: number;
+    }[];
+    heatmap: {
+      className: string;
+      subjects: { name: string; avg: number }[];
+    }[];
+    strongest_subject: string;
+    weakest_subject: string;
+  };
+  term_progress: {
+    terms: {
+      termCode: string;
+      termName: string;
+      avgGrade: number;
+      passRate: number;
+      count: number;
+    }[];
+    term_by_subject: {
+      subject: string;
+      terms: { term: string; avg: number }[];
+    }[];
+  };
+  subject_trends: {
+    trends: {
+      subject: string;
+      years: { year: string; avg: number }[];
+    }[];
+  };
+  honor_roll: {
+    total_honor: number;
+    honor_rate: number;
+    top_students: {
+      studentNumber: string;
+      avg: number;
+      classRank: number;
+      secRank: number;
+      className: string;
+    }[];
+    honor_by_class: {
+      classCode: string;
+      className: string;
+      count: number;
+      total: number;
+      rate: number;
+    }[];
+  };
+  at_risk: {
+    total_at_risk: number;
+    at_risk_rate: number;
+    at_risk_students: {
+      studentNumber: string;
+      avg: number;
+      absenceDays: number;
+      className: string;
+    }[];
+    at_risk_by_class: {
+      classCode: string;
+      className: string;
+      count: number;
+      total: number;
+      rate: number;
+    }[];
+  };
 }
 
 export interface YearSummary {

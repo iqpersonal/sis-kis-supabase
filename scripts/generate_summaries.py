@@ -115,6 +115,55 @@ def empty_school_data():
             "attendance_by_month": [],
             "class_breakdown": [],
         },
+        "attendance_detail": {
+            "total_absence_days": 0,
+            "total_tardy": 0,
+            "students_with_absences": 0,
+            "students_with_tardy": 0,
+            "avg_absence_per_student": 0,
+            "avg_tardy_per_student": 0,
+            "top_absentees": [],
+            "absence_by_class": [],
+            "tardy_by_class": [],
+        },
+        "delinquency": {
+            "total_charged": 0,
+            "total_paid": 0,
+            "total_outstanding": 0,
+            "total_discount": 0,
+            "collection_rate": 0,
+            "students_fully_paid": 0,
+            "students_with_balance": 0,
+            "students_zero_paid": 0,
+            "balance_by_installment": [],
+            "balance_by_class": [],
+            "top_delinquents": [],
+        },
+        "subject_performance": {
+            "subjects": [],            # [{name, avg, min, max, sectionCount}]
+            "heatmap": [],              # [{className, subjects: [{name, avg}]}]
+            "strongest_subject": "",
+            "weakest_subject": "",
+        },
+        "term_progress": {
+            "terms": [],                # [{termCode, termName, avgGrade, passRate, count}]
+            "term_by_subject": [],      # [{subject, terms: [{term, avg}]}]
+        },
+        "subject_trends": {
+            "trends": [],               # [{subject, years: [{year, avg}]}]
+        },
+        "honor_roll": {
+            "total_honor": 0,
+            "honor_rate": 0,
+            "top_students": [],         # [{studentNumber, avg, classRank, secRank, className}]
+            "honor_by_class": [],       # [{className, count, rate}]
+        },
+        "at_risk": {
+            "total_at_risk": 0,
+            "at_risk_rate": 0,
+            "at_risk_students": [],     # [{studentNumber, avg, absenceDays, className}]
+            "at_risk_by_class": [],     # [{className, count, rate}]
+        },
     }
 
 
@@ -419,6 +468,551 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         ]
         summary[filter_key]["academics"]["attendance_by_month"] = attendance
 
+    # ── Attendance detail (for Attendance & Conduct report) ──
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        stu_abs_days = defaultdict(int)
+        stu_tardy_count = defaultdict(int)
+        class_abs_total = defaultdict(int)
+        class_tardy_total = defaultdict(int)
+        class_stu_set = defaultdict(set)
+
+        for a in absences:
+            sn = str(a.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            days = int(a.days)
+            stu_abs_days[sn] += days
+            cc = student_class.get(sn, "")
+            if cc:
+                class_abs_total[cc] += days
+                class_stu_set[cc].add(sn)
+
+        for t in tardies:
+            sn = str(t.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            stu_tardy_count[sn] += 1
+            cc = student_class.get(sn, "")
+            if cc:
+                class_tardy_total[cc] += 1
+                class_stu_set[cc].add(sn)
+
+        total_abs = sum(stu_abs_days.values())
+        total_tard = sum(stu_tardy_count.values())
+        stu_with_abs = len(stu_abs_days)
+        stu_with_tard = len(stu_tardy_count)
+        n_stu = len(student_set)
+
+        # Top 10 absentees
+        sorted_abs = sorted(stu_abs_days.items(), key=lambda x: -x[1])[:10]
+        top_absentees = [{"studentNumber": sn, "days": d, "className": class_name_map.get(student_class.get(sn, ""), "")} for sn, d in sorted_abs]
+
+        # Absence by class
+        abs_by_class = []
+        for cc in sorted(class_stu_set.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            abs_by_class.append({
+                "classCode": cc,
+                "className": class_name_map.get(cc, cc),
+                "students": len(class_stu_set[cc]),
+                "absenceDays": class_abs_total.get(cc, 0),
+                "tardyCount": class_tardy_total.get(cc, 0),
+                "avgAbsence": round(class_abs_total.get(cc, 0) / len(class_stu_set[cc]), 1) if class_stu_set[cc] else 0,
+            })
+
+        # Tardy by class (separate view)
+        tardy_by_class = []
+        for cc in sorted(class_tardy_total.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            cnt = class_tardy_total[cc]
+            if cnt > 0:
+                tardy_by_class.append({
+                    "classCode": cc,
+                    "className": class_name_map.get(cc, cc),
+                    "count": cnt,
+                })
+
+        summary[filter_key]["attendance_detail"] = {
+            "total_absence_days": total_abs,
+            "total_tardy": total_tard,
+            "students_with_absences": stu_with_abs,
+            "students_with_tardy": stu_with_tard,
+            "avg_absence_per_student": round(total_abs / n_stu, 1) if n_stu > 0 else 0,
+            "avg_tardy_per_student": round(total_tard / n_stu, 1) if n_stu > 0 else 0,
+            "top_absentees": top_absentees,
+            "absence_by_class": abs_by_class,
+            "tardy_by_class": tardy_by_class,
+        }
+
+    # ── Financial delinquency (for Financial Delinquency report) ──
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        stu_charges = defaultdict(lambda: {"charged": 0.0, "paid": 0.0, "discount": 0.0, "balance": 0.0})
+        inst_balance = defaultdict(float)  # term → outstanding
+        inst_charged = defaultdict(float)
+        class_balance = defaultdict(float)
+        class_charged = defaultdict(float)
+
+        for ch in charges:
+            sn = str(ch.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            amt = float(ch.charges)
+            pd = float(ch.paid)
+            disc = float(ch.discount)
+            bal = float(ch.balance)
+            stu_charges[sn]["charged"] += amt
+            stu_charges[sn]["paid"] += pd
+            stu_charges[sn]["discount"] += disc
+            stu_charges[sn]["balance"] += bal
+
+            term = charge_type_term_map.get(str(ch.Charge_Type_Code or ""), 0)
+            inst_balance[term] += bal
+            inst_charged[term] += amt
+
+            cc = student_class.get(sn, "")
+            if cc:
+                class_balance[cc] += bal
+                class_charged[cc] += amt
+
+        total_charged = sum(s["charged"] for s in stu_charges.values())
+        total_paid = sum(s["paid"] for s in stu_charges.values())
+        total_disc = sum(s["discount"] for s in stu_charges.values())
+        total_outstanding = sum(s["balance"] for s in stu_charges.values())
+        fully_paid = sum(1 for s in stu_charges.values() if s["balance"] <= 0)
+        with_balance = sum(1 for s in stu_charges.values() if s["balance"] > 0)
+        zero_paid = sum(1 for s in stu_charges.values() if s["paid"] <= 0 and s["charged"] > 0)
+        collection_rate = (total_paid / total_charged * 100) if total_charged > 0 else 0
+
+        # Balance by installment
+        labels = {1: "Installment 1", 2: "Installment 2", 3: "Installment 3", 0: "Other"}
+        balance_by_inst = []
+        for t in (1, 2, 3, 0):
+            balance_by_inst.append({
+                "term": t,
+                "label": labels[t],
+                "outstanding": round(inst_balance.get(t, 0), 2),
+                "charged": round(inst_charged.get(t, 0), 2),
+                "rate": round(((inst_charged.get(t, 0) - inst_balance.get(t, 0)) / inst_charged.get(t, 0) * 100) if inst_charged.get(t, 0) > 0 else 0, 1),
+            })
+
+        # Balance by class
+        bal_by_class = []
+        for cc in sorted(class_balance.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            if class_balance[cc] > 0:
+                bal_by_class.append({
+                    "classCode": cc,
+                    "className": class_name_map.get(cc, cc),
+                    "outstanding": round(class_balance[cc], 2),
+                    "charged": round(class_charged.get(cc, 0), 2),
+                    "rate": round(((class_charged.get(cc, 0) - class_balance[cc]) / class_charged.get(cc, 0) * 100) if class_charged.get(cc, 0) > 0 else 0, 1),
+                })
+
+        # Top 10 delinquent students
+        sorted_del = sorted(stu_charges.items(), key=lambda x: -x[1]["balance"])
+        top_del = []
+        for sn, d in sorted_del[:10]:
+            if d["balance"] <= 0:
+                break
+            top_del.append({
+                "studentNumber": sn,
+                "charged": round(d["charged"], 2),
+                "paid": round(d["paid"], 2),
+                "balance": round(d["balance"], 2),
+                "className": class_name_map.get(student_class.get(sn, ""), ""),
+            })
+
+        summary[filter_key]["delinquency"] = {
+            "total_charged": round(total_charged, 2),
+            "total_paid": round(total_paid, 2),
+            "total_outstanding": round(total_outstanding, 2),
+            "total_discount": round(total_disc, 2),
+            "collection_rate": round(collection_rate, 1),
+            "students_fully_paid": fully_paid,
+            "students_with_balance": with_balance,
+            "students_zero_paid": zero_paid,
+            "balance_by_installment": balance_by_inst,
+            "balance_by_class": bal_by_class,
+            "top_delinquents": top_del,
+        }
+
+    # ── Subject Performance (heatmap + KPIs) ──
+    # Uses Section_Avg to get per-subject averages (Exam_Code='11' = Total year)
+    # Also uses Class_Avg for the class×subject heatmap
+    cursor.execute("""
+        SELECT sa.Subject_Code, s.E_Subject_Name, sa.Major_Code,
+               AVG(sa.Section_Average) as avg_of_avgs,
+               MIN(sa.Section_Average) as min_avg,
+               MAX(sa.Section_Average) as max_avg,
+               COUNT(*) as section_count
+        FROM Section_Avg sa
+        JOIN Subject s ON sa.Subject_Code = s.Subject_Code
+        WHERE sa.Academic_Year = ? AND sa.Exam_Code = '11'
+          AND sa.Subject_Code NOT IN ('800','900')
+        GROUP BY sa.Subject_Code, s.E_Subject_Name, sa.Major_Code
+        ORDER BY sa.Subject_Code
+    """, year_val)
+    subj_perf_rows = cursor.fetchall()
+
+    # Fall back to Exam_Code='05' (First Semester) if no '11' data
+    if not subj_perf_rows:
+        cursor.execute("""
+            SELECT sa.Subject_Code, s.E_Subject_Name, sa.Major_Code,
+                   AVG(sa.Section_Average) as avg_of_avgs,
+                   MIN(sa.Section_Average) as min_avg,
+                   MAX(sa.Section_Average) as max_avg,
+                   COUNT(*) as section_count
+            FROM Section_Avg sa
+            JOIN Subject s ON sa.Subject_Code = s.Subject_Code
+            WHERE sa.Academic_Year = ? AND sa.Exam_Code = '05'
+              AND sa.Subject_Code NOT IN ('800','900')
+            GROUP BY sa.Subject_Code, s.E_Subject_Name, sa.Major_Code
+            ORDER BY sa.Subject_Code
+        """, year_val)
+        subj_perf_rows = cursor.fetchall()
+
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        subj_map = {}
+        for r in subj_perf_rows:
+            mc = str(r.Major_Code or "")
+            if filter_key != "all" and mc != filter_key:
+                continue
+            name = str(r.E_Subject_Name)
+            if r.avg_of_avgs is None:
+                continue
+            if name not in subj_map:
+                subj_map[name] = {"avg_sum": 0, "avg_cnt": 0, "min": 999, "max": 0, "sec_cnt": 0}
+            subj_map[name]["avg_sum"] += float(r.avg_of_avgs) * int(r.section_count)
+            subj_map[name]["avg_cnt"] += int(r.section_count)
+            subj_map[name]["min"] = min(subj_map[name]["min"], float(r.min_avg or 0))
+            subj_map[name]["max"] = max(subj_map[name]["max"], float(r.max_avg or 0))
+            subj_map[name]["sec_cnt"] += int(r.section_count)
+
+        subjects_list = []
+        for name, d in sorted(subj_map.items(), key=lambda x: x[0]):
+            avg = d["avg_sum"] / d["avg_cnt"] if d["avg_cnt"] > 0 else 0
+            subjects_list.append({
+                "name": name,
+                "avg": round(avg, 1),
+                "min": round(d["min"], 0),
+                "max": round(d["max"], 0),
+                "sectionCount": d["sec_cnt"],
+            })
+
+        strongest = max(subjects_list, key=lambda x: x["avg"])["name"] if subjects_list else ""
+        weakest = min(subjects_list, key=lambda x: x["avg"])["name"] if subjects_list else ""
+
+        summary[filter_key]["subject_performance"]["subjects"] = subjects_list
+        summary[filter_key]["subject_performance"]["strongest_subject"] = strongest
+        summary[filter_key]["subject_performance"]["weakest_subject"] = weakest
+
+    # Subject × Class heatmap using Class_Avg
+    exam_code_for_heatmap = '11'
+    cursor.execute("""
+        SELECT ca.Class_Code, cl.E_Class_Desc, ca.Subject_Code, s.E_Subject_Name,
+               ca.Class_Average, ca.Major_Code
+        FROM Class_Avg ca
+        JOIN Subject s ON ca.Subject_Code = s.Subject_Code
+        JOIN Class cl ON ca.Class_Code = cl.Class_Code
+        WHERE ca.Academic_Year = ? AND ca.Exam_Code = ?
+          AND ca.Subject_Code NOT IN ('800','900')
+        ORDER BY ca.Class_Code, ca.Subject_Code
+    """, year_val, exam_code_for_heatmap)
+    heatmap_rows = cursor.fetchall()
+
+    if not heatmap_rows:
+        cursor.execute("""
+            SELECT ca.Class_Code, cl.E_Class_Desc, ca.Subject_Code, s.E_Subject_Name,
+                   ca.Class_Average, ca.Major_Code
+            FROM Class_Avg ca
+            JOIN Subject s ON ca.Subject_Code = s.Subject_Code
+            JOIN Class cl ON ca.Class_Code = cl.Class_Code
+            WHERE ca.Academic_Year = ? AND ca.Exam_Code = '05'
+              AND ca.Subject_Code NOT IN ('800','900')
+            ORDER BY ca.Class_Code, ca.Subject_Code
+        """, year_val)
+        heatmap_rows = cursor.fetchall()
+
+    for filter_key in ("all", "0021-01", "0021-02"):
+        class_subj = defaultdict(dict)  # className → {subjName: avg}
+        for r in heatmap_rows:
+            mc = str(r.Major_Code or "")
+            if filter_key != "all" and mc != filter_key:
+                continue
+            cn = str(r.E_Class_Desc)
+            sn = str(r.E_Subject_Name)
+            avg = float(r.Class_Average or 0)
+            # If multiple rows for same class+subject (duplicate major codes), average them
+            if sn in class_subj[cn]:
+                class_subj[cn][sn] = (class_subj[cn][sn] + avg) / 2
+            else:
+                class_subj[cn][sn] = avg
+
+        heatmap = []
+        for cn in sorted(class_subj.keys()):
+            subjects = [{"name": sn, "avg": round(a, 1)} for sn, a in sorted(class_subj[cn].items())]
+            heatmap.append({"className": cn, "subjects": subjects})
+
+        summary[filter_key]["subject_performance"]["heatmap"] = heatmap
+
+    # ── Term-by-Term Progress ──
+    # Use Student_Exam_Results grouped by Exam_Code (semester totals: 05, 10, 14)
+    cursor.execute("""
+        SELECT ser.Exam_Code, e.E_Exam_Desc, ser.Student_Number,
+               ser.Final_Average_Grade, ser.Student_Result
+        FROM Student_Exam_Results ser
+        JOIN Exams e ON ser.Exam_Code = e.Exam_Code
+        WHERE ser.Academic_Year = ?
+          AND ser.Exam_Code IN ('05','10','14')
+        ORDER BY ser.Exam_Code
+    """, year_val)
+    term_rows = cursor.fetchall()
+
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        term_data = defaultdict(lambda: {"name": "", "sum": 0, "cnt": 0, "pass": 0, "fail": 0})
+        for r in term_rows:
+            sn = str(r.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            ec = str(r.Exam_Code)
+            term_data[ec]["name"] = str(r.E_Exam_Desc)
+            term_data[ec]["sum"] += float(r.Final_Average_Grade or 0)
+            term_data[ec]["cnt"] += 1
+            if str(r.Student_Result or "").upper() == "P":
+                term_data[ec]["pass"] += 1
+            elif str(r.Student_Result or "").upper() == "F":
+                term_data[ec]["fail"] += 1
+
+        terms_result = []
+        for ec in ("05", "10", "14"):
+            if ec in term_data:
+                d = term_data[ec]
+                terms_result.append({
+                    "termCode": ec,
+                    "termName": d["name"],
+                    "avgGrade": round(d["sum"] / d["cnt"], 1) if d["cnt"] > 0 else 0,
+                    "passRate": round(d["pass"] / d["cnt"] * 100, 1) if d["cnt"] > 0 else 0,
+                    "count": d["cnt"],
+                })
+
+        summary[filter_key]["term_progress"]["terms"] = terms_result
+
+    # Term by subject — Section_Avg grouped by Exam_Code (use semester exams: 05,10,14)
+    cursor.execute("""
+        SELECT sa.Exam_Code, e.E_Exam_Desc, sa.Subject_Code, s.E_Subject_Name,
+               AVG(sa.Section_Average) as avg, sa.Major_Code
+        FROM Section_Avg sa
+        JOIN Subject s ON sa.Subject_Code = s.Subject_Code
+        JOIN Exams e ON sa.Exam_Code = e.Exam_Code
+        WHERE sa.Academic_Year = ? AND sa.Exam_Code IN ('05','10','14')
+          AND sa.Subject_Code NOT IN ('800','900')
+        GROUP BY sa.Exam_Code, e.E_Exam_Desc, sa.Subject_Code, s.E_Subject_Name, sa.Major_Code
+        ORDER BY sa.Subject_Code, sa.Exam_Code
+    """, year_val)
+    term_subj_rows = cursor.fetchall()
+
+    for filter_key in ("all", "0021-01", "0021-02"):
+        subj_terms = defaultdict(list)  # subject_name → [{term, avg}]
+        seen = defaultdict(set)
+        for r in term_subj_rows:
+            mc = str(r.Major_Code or "")
+            if filter_key != "all" and mc != filter_key:
+                continue
+            if r.avg is None:
+                continue
+            name = str(r.E_Subject_Name)
+            ec = str(r.Exam_Code)
+            if ec in seen[name]:
+                continue
+            seen[name].add(ec)
+            subj_terms[name].append({
+                "term": str(r.E_Exam_Desc),
+                "avg": round(float(r.avg), 1),
+            })
+
+        result = [{"subject": name, "terms": terms} for name, terms in sorted(subj_terms.items())]
+        summary[filter_key]["term_progress"]["term_by_subject"] = result
+
+    # ── Subject Trends (multi-year) ──
+    # For each subject, get avg across ALL years using Class_Avg (Exam 11=Total, fallback 05)
+    cursor.execute("""
+        SELECT ca.Academic_Year, ca.Subject_Code, s.E_Subject_Name,
+               AVG(ca.Class_Average) as avg
+        FROM Class_Avg ca
+        JOIN Subject s ON ca.Subject_Code = s.Subject_Code
+        WHERE ca.Exam_Code = '11'
+          AND ca.Subject_Code NOT IN ('800','900')
+        GROUP BY ca.Academic_Year, ca.Subject_Code, s.E_Subject_Name
+        ORDER BY ca.Subject_Code, ca.Academic_Year
+    """)
+    trend_rows = cursor.fetchall()
+
+    # Subject trends is the same for all filter_keys (Class_Avg doesn't have Major_Code in
+    # a reliable way across years), so we compute once and assign to all
+    subj_year_data = defaultdict(list)
+    for r in trend_rows:
+        if r.avg is None:
+            continue
+        name = str(r.E_Subject_Name)
+        subj_year_data[name].append({
+            "year": str(r.Academic_Year),
+            "avg": round(float(r.avg), 1),
+        })
+
+    trends_result = [{"subject": name, "years": years}
+                     for name, years in sorted(subj_year_data.items())]
+
+    for filter_key in ("all", "0021-01", "0021-02"):
+        summary[filter_key]["subject_trends"]["trends"] = trends_result
+
+    # ── Honor Roll ──
+    # Students with Final_Average_Grade >= 95 on the final exam (Exam 11 or best semester)
+    # Use the "best" available comprehensive exam: 11 (Total), then 10 (Second Semester), then 05
+    honor_exam = None
+    for ec in ('11', '10', '05'):
+        cursor.execute("""
+            SELECT COUNT(*) FROM Student_Exam_Results
+            WHERE Academic_Year = ? AND Exam_Code = ?
+        """, year_val, ec)
+        cnt = cursor.fetchone()[0]
+        if cnt > 0:
+            honor_exam = ec
+            break
+
+    if honor_exam:
+        cursor.execute("""
+            SELECT ser.Student_Number, ser.Final_Average_Grade,
+                   ser.Class_Rank, ser.Section_Rank
+            FROM Student_Exam_Results ser
+            WHERE ser.Academic_Year = ? AND ser.Exam_Code = ?
+            ORDER BY ser.Final_Average_Grade DESC
+        """, year_val, honor_exam)
+        honor_rows = cursor.fetchall()
+    else:
+        honor_rows = []
+
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        honor_students = []
+        total_students_exam = 0
+        class_honor_cnt = defaultdict(int)
+        class_total_cnt = defaultdict(int)
+
+        for r in honor_rows:
+            sn = str(r.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            total_students_exam += 1
+            cc = student_class.get(sn, "")
+            class_total_cnt[cc] += 1
+            avg = float(r.Final_Average_Grade or 0)
+
+            if avg >= 95:
+                class_honor_cnt[cc] += 1
+                honor_students.append({
+                    "studentNumber": sn,
+                    "avg": round(avg, 1),
+                    "classRank": int(r.Class_Rank or 0),
+                    "secRank": int(r.Section_Rank or 0),
+                    "className": class_name_map.get(cc, cc),
+                })
+
+        total_honor = len(honor_students)
+        honor_rate = round(total_honor / total_students_exam * 100, 1) if total_students_exam > 0 else 0
+
+        # Top 20 honor students
+        top_honor = sorted(honor_students, key=lambda x: -x["avg"])[:20]
+
+        # Honor by class
+        honor_by_class = []
+        for cc in sorted(class_honor_cnt.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            h_cnt = class_honor_cnt[cc]
+            t_cnt = class_total_cnt[cc]
+            honor_by_class.append({
+                "classCode": cc,
+                "className": class_name_map.get(cc, cc),
+                "count": h_cnt,
+                "total": t_cnt,
+                "rate": round(h_cnt / t_cnt * 100, 1) if t_cnt > 0 else 0,
+            })
+
+        summary[filter_key]["honor_roll"] = {
+            "total_honor": total_honor,
+            "honor_rate": honor_rate,
+            "top_students": top_honor,
+            "honor_by_class": honor_by_class,
+        }
+
+    # ── At-Risk Students ──
+    # Students with avg < 70 on the latest semester exam, cross-referenced with absences
+    at_risk_exam = honor_exam  # use same exam
+
+    for filter_key, student_set in [("all", all_student_numbers),
+                                     ("0021-01", major_students["0021-01"]),
+                                     ("0021-02", major_students["0021-02"])]:
+        at_risk_students = []
+        total_students_exam = 0
+        class_risk_cnt = defaultdict(int)
+        class_total_cnt = defaultdict(int)
+
+        # Build per-student absence map
+        stu_abs = defaultdict(int)
+        for a in absences:
+            sn = str(a.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            stu_abs[sn] += int(a.days)
+
+        for r in honor_rows:
+            sn = str(r.Student_Number)
+            if filter_key != "all" and sn not in student_set:
+                continue
+            total_students_exam += 1
+            cc = student_class.get(sn, "")
+            class_total_cnt[cc] += 1
+            avg = float(r.Final_Average_Grade or 0)
+
+            if avg < 70:
+                class_risk_cnt[cc] += 1
+                at_risk_students.append({
+                    "studentNumber": sn,
+                    "avg": round(avg, 1),
+                    "absenceDays": stu_abs.get(sn, 0),
+                    "className": class_name_map.get(cc, cc),
+                })
+
+        total_risk = len(at_risk_students)
+        risk_rate = round(total_risk / total_students_exam * 100, 1) if total_students_exam > 0 else 0
+
+        # Sort by avg ascending (worst first), limit to 30
+        at_risk_sorted = sorted(at_risk_students, key=lambda x: x["avg"])[:30]
+
+        # At-risk by class
+        risk_by_class = []
+        for cc in sorted(class_risk_cnt.keys(), key=lambda x: int(x) if x.isdigit() else 0):
+            r_cnt = class_risk_cnt[cc]
+            t_cnt = class_total_cnt[cc]
+            risk_by_class.append({
+                "classCode": cc,
+                "className": class_name_map.get(cc, cc),
+                "count": r_cnt,
+                "total": t_cnt,
+                "rate": round(r_cnt / t_cnt * 100, 1) if t_cnt > 0 else 0,
+            })
+
+        summary[filter_key]["at_risk"] = {
+            "total_at_risk": total_risk,
+            "at_risk_rate": risk_rate,
+            "at_risk_students": at_risk_sorted,
+            "at_risk_by_class": risk_by_class,
+        }
+
     # ── Finalize class breakdown ──
     # Count unique students per class
     class_students_all = defaultdict(set)
@@ -532,6 +1126,12 @@ def main():
         total_paid = sum(i["totalPaid"] for i in fin)
         print(f"  ✓ Total Charges: SAR {total_charges:,.0f}")
         print(f"  ✓ Total Paid: SAR {total_paid:,.0f}")
+        subj_cnt = len(s['subject_performance']['subjects'])
+        print(f"  ✓ Subject Performance: {subj_cnt} subjects, strongest={s['subject_performance']['strongest_subject']}, weakest={s['subject_performance']['weakest_subject']}")
+        print(f"  ✓ Term Progress: {len(s['term_progress']['terms'])} terms")
+        print(f"  ✓ Subject Trends: {len(s['subject_trends']['trends'])} subjects tracked")
+        print(f"  ✓ Honor Roll: {s['honor_roll']['total_honor']} students ({s['honor_roll']['honor_rate']}%)")
+        print(f"  ✓ At Risk: {s['at_risk']['total_at_risk']} students ({s['at_risk']['at_risk_rate']}%)")
         print(f"  ✓ Written to Firestore: summaries/{year}")
 
     cursor.close()

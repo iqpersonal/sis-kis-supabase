@@ -22,6 +22,14 @@ import {
   CalendarDays,
   GraduationCap,
   School,
+  CalendarOff,
+  DollarSign,
+  GitCompareArrows,
+  BookOpen,
+  CalendarRange,
+  TrendingUp,
+  Trophy,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +37,15 @@ const NAV = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/reports", label: "Students", icon: Users },
   { href: "/dashboard/academics", label: "Academics", icon: GraduationCap },
+  { href: "/dashboard/subjects", label: "Subject Performance", icon: BookOpen },
+  { href: "/dashboard/terms", label: "Term Progress", icon: CalendarRange },
+  { href: "/dashboard/subject-trends", label: "Subject Trends", icon: TrendingUp },
+  { href: "/dashboard/honor-roll", label: "Honor Roll", icon: Trophy },
+  { href: "/dashboard/at-risk", label: "At-Risk Students", icon: AlertTriangle },
+  { href: "/dashboard/attendance", label: "Attendance", icon: CalendarOff },
+  { href: "/dashboard/delinquency", label: "Delinquency", icon: DollarSign },
   { href: "/dashboard/analytics", label: "Analytics", icon: PieChart },
+  { href: "/dashboard/compare", label: "Year Comparison", icon: GitCompareArrows },
   { href: "/dashboard/upload", label: "Upload Data", icon: Upload },
 ];
 
