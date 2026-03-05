@@ -1,0 +1,68 @@
+"use client";
+
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+interface Props {
+  data: { range: string; students: number }[];
+}
+
+export function GradeDistributionChart({ data }: Props) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Grade Distribution</CardTitle>
+        <CardDescription>Students grouped by final average</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="h-[300px]" style={{ minWidth: 0, minHeight: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+              <XAxis
+                dataKey="range"
+                className="text-xs"
+                tick={{ fill: "var(--color-muted-foreground)" }}
+              />
+              <YAxis
+                className="text-xs"
+                tick={{ fill: "var(--color-muted-foreground)" }}
+              />
+              <Tooltip
+                formatter={(value) => [
+                  Number(value).toLocaleString(),
+                  "Students",
+                ]}
+                contentStyle={{
+                  backgroundColor: "var(--color-card)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "8px",
+                }}
+              />
+              <Bar
+                dataKey="students"
+                fill="var(--color-chart-1)"
+                radius={[4, 4, 0, 0]}
+                name="Students"
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
