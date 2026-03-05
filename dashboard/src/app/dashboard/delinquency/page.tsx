@@ -291,7 +291,7 @@ export default function DelinquencyPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
-                  <TableHead>Student Number</TableHead>
+                  <TableHead>Student Name</TableHead>
                   <TableHead>Class</TableHead>
                   <TableHead className="text-right">Charged</TableHead>
                   <TableHead className="text-right">Paid</TableHead>
@@ -302,8 +302,8 @@ export default function DelinquencyPage() {
                 {del.top_delinquents.map((s, i) => (
                   <TableRow key={s.studentNumber}>
                     <TableCell>{i + 1}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {s.studentNumber}
+                    <TableCell className="font-medium">
+                      {s.studentName}
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right">

@@ -107,7 +107,7 @@ export default function AtRiskPage() {
   const scatterData = ar.at_risk_students.map((s) => ({
     avg: s.avg,
     absences: s.absenceDays,
-    student: s.studentNumber,
+    student: s.studentName,
     className: s.className,
   }));
 
@@ -259,7 +259,7 @@ export default function AtRiskPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
-                  <TableHead>Student Number</TableHead>
+                  <TableHead>Student Name</TableHead>
                   <TableHead>Class</TableHead>
                   <TableHead className="text-right">Average</TableHead>
                   <TableHead className="text-right">Absence Days</TableHead>
@@ -270,8 +270,8 @@ export default function AtRiskPage() {
                 {ar.at_risk_students.map((s, i) => (
                   <TableRow key={s.studentNumber}>
                     <TableCell>{i + 1}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {s.studentNumber}
+                    <TableCell className="font-medium">
+                      {s.studentName}
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right font-semibold text-red-600">

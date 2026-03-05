@@ -237,6 +237,26 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         summary[mc]["active_registrations"] = major_active[mc]
         summary[mc]["total_students"] = len(major_students[mc])
 
+    # ── Student name lookup ──
+    cursor.execute("""
+        SELECT DISTINCT r.Student_Number,
+               ISNULL(fc.E_Child_Name, '') as first_name,
+               ISNULL(f.E_Family_Name, '') as last_name
+        FROM Registration r
+        JOIN Student s ON r.Student_Number = s.Student_Number
+        JOIN Family_Children fc
+          ON s.Family_Number = fc.Family_Number
+         AND s.Child_Number  = fc.Child_Number
+        JOIN Family f ON s.Family_Number = f.Family_Number
+        WHERE r.Academic_Year = ?
+    """, year_val)
+    student_name_map = {}  # student_number → full name
+    for r in cursor.fetchall():
+        sn = str(r.Student_Number)
+        first = str(r.first_name or "").strip()
+        last = str(r.last_name or "").strip()
+        student_name_map[sn] = f"{first} {last}".strip() or sn
+
     # ── Nationality distribution ──
     # Join Registration→Student→Family_Children to get nationality per student
     cursor.execute("""
@@ -507,7 +527,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
 
         # Top 10 absentees
         sorted_abs = sorted(stu_abs_days.items(), key=lambda x: -x[1])[:10]
-        top_absentees = [{"studentNumber": sn, "days": d, "className": class_name_map.get(student_class.get(sn, ""), "")} for sn, d in sorted_abs]
+        top_absentees = [{"studentNumber": sn, "studentName": student_name_map.get(sn, sn), "days": d, "className": class_name_map.get(student_class.get(sn, ""), "")} for sn, d in sorted_abs]
 
         # Absence by class
         abs_by_class = []
@@ -617,6 +637,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                 break
             top_del.append({
                 "studentNumber": sn,
+                "studentName": student_name_map.get(sn, sn),
                 "charged": round(d["charged"], 2),
                 "paid": round(d["paid"], 2),
                 "balance": round(d["balance"], 2),
@@ -917,6 +938,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                 class_honor_cnt[cc] += 1
                 honor_students.append({
                     "studentNumber": sn,
+                    "studentName": student_name_map.get(sn, sn),
                     "avg": round(avg, 1),
                     "classRank": int(r.Class_Rank or 0),
                     "secRank": int(r.Section_Rank or 0),
@@ -982,6 +1004,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                 class_risk_cnt[cc] += 1
                 at_risk_students.append({
                     "studentNumber": sn,
+                    "studentName": student_name_map.get(sn, sn),
                     "avg": round(avg, 1),
                     "absenceDays": stu_abs.get(sn, 0),
                     "className": class_name_map.get(cc, cc),

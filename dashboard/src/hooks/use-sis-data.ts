@@ -315,7 +315,7 @@ export interface SummarySchoolData {
     students_with_tardy: number;
     avg_absence_per_student: number;
     avg_tardy_per_student: number;
-    top_absentees: { studentNumber: string; days: number; className: string }[];
+    top_absentees: { studentNumber: string; studentName: string; days: number; className: string }[];
     absence_by_class: {
       classCode: string;
       className: string;
@@ -351,6 +351,7 @@ export interface SummarySchoolData {
     }[];
     top_delinquents: {
       studentNumber: string;
+      studentName: string;
       charged: number;
       paid: number;
       balance: number;
@@ -396,6 +397,7 @@ export interface SummarySchoolData {
     honor_rate: number;
     top_students: {
       studentNumber: string;
+      studentName: string;
       avg: number;
       classRank: number;
       secRank: number;
@@ -414,6 +416,7 @@ export interface SummarySchoolData {
     at_risk_rate: number;
     at_risk_students: {
       studentNumber: string;
+      studentName: string;
       avg: number;
       absenceDays: number;
       className: string;

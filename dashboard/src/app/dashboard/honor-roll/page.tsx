@@ -197,7 +197,7 @@ export default function HonorRollPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
-                  <TableHead>Student Number</TableHead>
+                  <TableHead>Student Name</TableHead>
                   <TableHead>Class</TableHead>
                   <TableHead className="text-right">Average</TableHead>
                   <TableHead className="text-right">Class Rank</TableHead>
@@ -216,8 +216,8 @@ export default function HonorRollPage() {
                         i + 1
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {s.studentNumber}
+                    <TableCell className="font-medium">
+                      {s.studentName}
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right font-semibold text-yellow-600">

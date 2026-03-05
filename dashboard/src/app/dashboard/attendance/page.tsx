@@ -216,7 +216,7 @@ export default function AttendancePage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>#</TableHead>
-                  <TableHead>Student Number</TableHead>
+                  <TableHead>Student Name</TableHead>
                   <TableHead>Class</TableHead>
                   <TableHead className="text-right">Absence Days</TableHead>
                 </TableRow>
@@ -225,8 +225,8 @@ export default function AttendancePage() {
                 {att.top_absentees.map((s, i) => (
                   <TableRow key={s.studentNumber}>
                     <TableCell>{i + 1}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {s.studentNumber}
+                    <TableCell className="font-medium">
+                      {s.studentName}
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right font-semibold text-red-600">
