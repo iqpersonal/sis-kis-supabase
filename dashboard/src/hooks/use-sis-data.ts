@@ -274,6 +274,14 @@ export function useRegistrationCountsByYear(years: string[]) {
 /*  Pre-aggregated summary document (1 read per year)                 */
 /* ------------------------------------------------------------------ */
 
+export interface StudentDetail {
+  gender: string;
+  dob: string;
+  nationality: string;
+  section: string;
+  subjects: { subject: string; grade: number }[];
+}
+
 export interface SummarySchoolData {
   total_students: number;
   active_registrations: number;
@@ -315,7 +323,7 @@ export interface SummarySchoolData {
     students_with_tardy: number;
     avg_absence_per_student: number;
     avg_tardy_per_student: number;
-    top_absentees: { studentNumber: string; studentName: string; days: number; className: string }[];
+    top_absentees: { studentNumber: string; studentName: string; days: number; className: string; detail: StudentDetail }[];
     absence_by_class: {
       classCode: string;
       className: string;
@@ -356,6 +364,7 @@ export interface SummarySchoolData {
       paid: number;
       balance: number;
       className: string;
+      detail: StudentDetail;
     }[];
   };
   subject_performance: {
@@ -402,6 +411,7 @@ export interface SummarySchoolData {
       classRank: number;
       secRank: number;
       className: string;
+      detail: StudentDetail;
     }[];
     honor_by_class: {
       classCode: string;
@@ -420,6 +430,7 @@ export interface SummarySchoolData {
       avg: number;
       absenceDays: number;
       className: string;
+      detail: StudentDetail;
     }[];
     at_risk_by_class: {
       classCode: string;

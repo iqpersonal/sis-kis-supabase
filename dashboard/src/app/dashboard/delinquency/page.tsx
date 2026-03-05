@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { StudentDetailDialog } from "@/components/student-detail-dialog";
 import {
   Card,
   CardContent,
@@ -303,7 +304,21 @@ export default function DelinquencyPage() {
                   <TableRow key={s.studentNumber}>
                     <TableCell>{i + 1}</TableCell>
                     <TableCell className="font-medium">
-                      {s.studentName}
+                      <StudentDetailDialog
+                        studentName={s.studentName}
+                        studentNumber={s.studentNumber}
+                        className={s.className}
+                        detail={s.detail}
+                        stats={[
+                          { label: "Charged", value: formatSAR(s.charged) },
+                          { label: "Paid", value: formatSAR(s.paid) },
+                          { label: "Balance", value: formatSAR(s.balance) },
+                        ]}
+                      >
+                        <button className="text-left hover:underline text-blue-600 cursor-pointer">
+                          {s.studentName}
+                        </button>
+                      </StudentDetailDialog>
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right">

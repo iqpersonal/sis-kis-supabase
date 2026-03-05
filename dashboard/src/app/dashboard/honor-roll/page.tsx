@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { StudentDetailDialog } from "@/components/student-detail-dialog";
 import {
   Card,
   CardContent,
@@ -217,7 +218,21 @@ export default function HonorRollPage() {
                       )}
                     </TableCell>
                     <TableCell className="font-medium">
-                      {s.studentName}
+                      <StudentDetailDialog
+                        studentName={s.studentName}
+                        studentNumber={s.studentNumber}
+                        className={s.className}
+                        detail={s.detail}
+                        stats={[
+                          { label: "Average", value: s.avg },
+                          { label: "Class Rank", value: s.classRank },
+                          { label: "Section Rank", value: s.secRank },
+                        ]}
+                      >
+                        <button className="text-left hover:underline text-blue-600 cursor-pointer">
+                          {s.studentName}
+                        </button>
+                      </StudentDetailDialog>
                     </TableCell>
                     <TableCell>{s.className}</TableCell>
                     <TableCell className="text-right font-semibold text-yellow-600">

@@ -60,6 +60,21 @@ def json_safe(val):
     return val
 
 
+def _build_student_detail(sn, student_detail_map, student_grades_map):
+    """Build a detail sub-dict for a student to embed in summary lists."""
+    info = student_detail_map.get(sn, {})
+    grades = student_grades_map.get(sn, {})
+    # Only include top-level detail fields (kept small to stay within Firestore 1MB doc limit)
+    subjects = [{"subject": s, "grade": g} for s, g in sorted(grades.items())]
+    return {
+        "gender": info.get("gender", ""),
+        "dob": info.get("dob", ""),
+        "nationality": info.get("nationality", ""),
+        "section": info.get("section", ""),
+        "subjects": subjects[:25],  # cap at 25 subjects
+    }
+
+
 def parse_term(desc: str) -> int:
     """Derive installment number (1/2/3) from a charge type description."""
     if re.search(r"(?:Fees|Term)\s*1\b", desc, re.I):
@@ -237,25 +252,57 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         summary[mc]["active_registrations"] = major_active[mc]
         summary[mc]["total_students"] = len(major_students[mc])
 
-    # ── Student name lookup ──
+    # ── Student name & detail lookup ──
     cursor.execute("""
         SELECT DISTINCT r.Student_Number,
                ISNULL(fc.E_Child_Name, '') as first_name,
-               ISNULL(f.E_Family_Name, '') as last_name
+               ISNULL(f.E_Family_Name, '') as last_name,
+               fc.Gender,
+               fc.Child_Birth_Date,
+               fc.Nationality_Code_Primary,
+               ISNULL(n.E_Nationality_Name, '') as nationality_name,
+               r.Section_Code,
+               ISNULL(sec.E_Section_Name, '') as section_name
         FROM Registration r
         JOIN Student s ON r.Student_Number = s.Student_Number
         JOIN Family_Children fc
           ON s.Family_Number = fc.Family_Number
          AND s.Child_Number  = fc.Child_Number
         JOIN Family f ON s.Family_Number = f.Family_Number
+        LEFT JOIN Nationality n ON fc.Nationality_Code_Primary = n.Nationality_Code
+        LEFT JOIN Section sec ON r.Section_Code = sec.Section_Code
         WHERE r.Academic_Year = ?
     """, year_val)
-    student_name_map = {}  # student_number → full name
+    student_name_map = {}   # student_number → full name
+    student_detail_map = {} # student_number → {gender, dob, nationality, section}
     for r in cursor.fetchall():
         sn = str(r.Student_Number)
         first = str(r.first_name or "").strip()
         last = str(r.last_name or "").strip()
         student_name_map[sn] = f"{first} {last}".strip() or sn
+        gender_code = str(r.Gender or "").strip()
+        student_detail_map[sn] = {
+            "gender": "Male" if gender_code == "1" else ("Female" if gender_code == "2" else gender_code),
+            "dob": str(r.Child_Birth_Date or "")[:10],
+            "nationality": str(r.nationality_name or "").strip(),
+            "section": str(r.section_name or "").strip(),
+        }
+
+    # ── Subject grades per student (for detail view) ──
+    # Get latest exam grades for all students in this year
+    cursor.execute("""
+        SELECT g.Student_Number, sub.E_Subject_Name, g.Grade, g.Exam_Code
+        FROM Grades g
+        JOIN Subject sub ON g.Subject_Code = sub.Subject_Code
+        WHERE g.Academic_Year = ? AND g.Grade IS NOT NULL
+        ORDER BY g.Exam_Code DESC
+    """, year_val)
+    student_grades_map = defaultdict(dict)  # sn → {subject: grade}
+    for r in cursor.fetchall():
+        sn = str(r.Student_Number)
+        subj = str(r.E_Subject_Name or "").strip()
+        if subj and subj not in student_grades_map[sn]:
+            student_grades_map[sn][subj] = round(float(r.Grade), 1) if r.Grade else 0
 
     # ── Nationality distribution ──
     # Join Registration→Student→Family_Children to get nationality per student
@@ -527,7 +574,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
 
         # Top 10 absentees (sorted by class, then days desc)
         sorted_abs = sorted(stu_abs_days.items(), key=lambda x: (class_name_map.get(student_class.get(x[0], ""), ""), -x[1]))[:10]
-        top_absentees = [{"studentNumber": sn, "studentName": student_name_map.get(sn, sn), "days": d, "className": class_name_map.get(student_class.get(sn, ""), "")} for sn, d in sorted_abs]
+        top_absentees = [{"studentNumber": sn, "studentName": student_name_map.get(sn, sn), "days": d, "className": class_name_map.get(student_class.get(sn, ""), ""), "detail": _build_student_detail(sn, student_detail_map, student_grades_map)} for sn, d in sorted_abs]
 
         # Absence by class
         abs_by_class = []
@@ -642,6 +689,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                 "paid": round(d["paid"], 2),
                 "balance": round(d["balance"], 2),
                 "className": class_name_map.get(student_class.get(sn, ""), ""),
+                "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
             })
 
         summary[filter_key]["delinquency"] = {
@@ -943,6 +991,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                     "classRank": int(r.Class_Rank or 0),
                     "secRank": int(r.Section_Rank or 0),
                     "className": class_name_map.get(cc, cc),
+                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
                 })
 
         total_honor = len(honor_students)
@@ -1008,6 +1057,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                     "avg": round(avg, 1),
                     "absenceDays": stu_abs.get(sn, 0),
                     "className": class_name_map.get(cc, cc),
+                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
                 })
 
         total_risk = len(at_risk_students)
