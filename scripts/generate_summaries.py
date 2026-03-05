@@ -525,8 +525,8 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         stu_with_tard = len(stu_tardy_count)
         n_stu = len(student_set)
 
-        # Top 10 absentees
-        sorted_abs = sorted(stu_abs_days.items(), key=lambda x: -x[1])[:10]
+        # Top 10 absentees (sorted by class, then days desc)
+        sorted_abs = sorted(stu_abs_days.items(), key=lambda x: (class_name_map.get(student_class.get(x[0], ""), ""), -x[1]))[:10]
         top_absentees = [{"studentNumber": sn, "studentName": student_name_map.get(sn, sn), "days": d, "className": class_name_map.get(student_class.get(sn, ""), "")} for sn, d in sorted_abs]
 
         # Absence by class
@@ -629,8 +629,8 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                     "rate": round(((class_charged.get(cc, 0) - class_balance[cc]) / class_charged.get(cc, 0) * 100) if class_charged.get(cc, 0) > 0 else 0, 1),
                 })
 
-        # Top 10 delinquent students
-        sorted_del = sorted(stu_charges.items(), key=lambda x: -x[1]["balance"])
+        # Top 10 delinquent students (sorted by class, then balance desc)
+        sorted_del = sorted(stu_charges.items(), key=lambda x: (class_name_map.get(student_class.get(x[0], ""), ""), -x[1]["balance"]))
         top_del = []
         for sn, d in sorted_del[:10]:
             if d["balance"] <= 0:
@@ -948,8 +948,8 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         total_honor = len(honor_students)
         honor_rate = round(total_honor / total_students_exam * 100, 1) if total_students_exam > 0 else 0
 
-        # Top 20 honor students
-        top_honor = sorted(honor_students, key=lambda x: -x["avg"])[:20]
+        # Top 20 honor students (sorted by class, then avg desc)
+        top_honor = sorted(honor_students, key=lambda x: (x["className"], -x["avg"]))[:20]
 
         # Honor by class
         honor_by_class = []
@@ -1013,8 +1013,8 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         total_risk = len(at_risk_students)
         risk_rate = round(total_risk / total_students_exam * 100, 1) if total_students_exam > 0 else 0
 
-        # Sort by avg ascending (worst first), limit to 30
-        at_risk_sorted = sorted(at_risk_students, key=lambda x: x["avg"])[:30]
+        # Sort by class, then avg ascending (worst first), limit to 30
+        at_risk_sorted = sorted(at_risk_students, key=lambda x: (x["className"], x["avg"]))[:30]
 
         # At-risk by class
         risk_by_class = []
