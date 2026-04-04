@@ -1,0 +1,85 @@
+import { NextRequest, NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase-admin";
+import { getCached, setCache } from "@/lib/cache";
+import { CACHE_PRIVATE } from "@/lib/cache-headers";
+
+/**
+ * GET /api/teacher/classes?username=...
+ * Returns classes assigned to the teacher via the assigned_classes field.
+ * Falls back to name-matching if no explicit assignments exist.
+ */
+export async function GET(req: NextRequest) {
+  const username = req.nextUrl.searchParams.get("username");
+  if (!username) {
+    return NextResponse.json({ error: "username required" }, { status: 400 });
+  }
+
+  try {
+    // Find teacher doc by username
+    const teacherSnap = await adminDb
+      .collection("admin_users")
+      .where("username", "==", username)
+      .where("role", "==", "teacher")
+      .limit(1)
+      .get();
+
+    if (teacherSnap.empty) {
+      return NextResponse.json({ classes: [] });
+    }
+
+    const teacherData = teacherSnap.docs[0].data();
+
+    interface ClassInfo {
+      id: string;
+      className: string;
+      section: string;
+      subject: string;
+      teacher: string;
+      year: string;
+      studentCount: number;
+    }
+
+    // ── Primary: use explicit assigned_classes ──
+    const assigned = teacherData.assigned_classes as
+      | { classId: string; className: string; section: string; year: string; campus?: string }[]
+      | undefined;
+
+    if (assigned && assigned.length > 0) {
+      const classes: ClassInfo[] = assigned.map((a: any) => ({
+        id: a.classId,
+        classId: a.classId,
+        className: a.className,
+        section: a.section,
+        subject: a.subject || "",
+        teacher: teacherData.displayName || "",
+        year: a.year,
+        studentCount: 0,
+      }));
+      return NextResponse.json({ classes }, { headers: CACHE_PRIVATE });
+    }
+
+    // ── Fallback: resolve sections from Firestore ──
+    // Build class-code → grade-name lookup (cached)
+    let classMap = getCached<Map<string, string>>("class_code_map");
+    if (!classMap) {
+      const classesSnap = await adminDb.collection("classes").get();
+      classMap = new Map<string, string>();
+      for (const doc of classesSnap.docs) {
+        const d = doc.data();
+        classMap.set(d.Class_Code, d.E_Class_Desc || d.E_Class_Abbreviation || "");
+      }
+      setCache("class_code_map", classMap);
+    }
+
+    // Get latest academic year sections
+    const sectionsSnap = await adminDb.collection("sections").get();
+    const classes: ClassInfo[] = [];
+
+    // No name matching possible without teacher field in sections
+    // Return empty — teacher must be assigned via admin
+    return NextResponse.json({ classes }, { headers: CACHE_PRIVATE });
+  } catch (err) {
+    console.error("Teacher classes error:", err);
+    return NextResponse.json({ error: "Failed to fetch classes" }, { status: 500 });
+  }
+}

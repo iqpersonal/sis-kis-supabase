@@ -5,25 +5,67 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { useLanguage } from "@/context/language-context";
+import { useAuth } from "@/context/auth-context";
 import { SisKpiCards } from "@/components/dashboard/sis-kpi-cards";
 import { RegistrationsByYearChart } from "@/components/dashboard/registrations-chart";
 import { NationalityPieChart } from "@/components/dashboard/nationality-pie-chart";
 import { FinancialChart } from "@/components/dashboard/financial-chart";
 import { TermFinancialCards } from "@/components/dashboard/term-financial-cards";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SyncStatusBanner } from "@/components/dashboard/sync-status-banner";
 
 export default function DashboardOverview() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
+  const { t } = useLanguage();
+  const { can, loading: authLoading } = useAuth();
 
   // Single Firestore read — pre-aggregated summary document
   const { summary, loading: loadSummary } = useSummary(selectedYear);
 
-  const loading = yearLoading || loadSummary;
+  const loading = yearLoading || loadSummary || authLoading;
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center text-muted-foreground">
-        Loading dashboard...
+      <div className="space-y-8">
+        <div>
+          <Skeleton className="h-9 w-48" />
+          <Skeleton className="mt-2 h-4 w-72" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[1, 2].map((i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-20" />
+                <Skeleton className="mt-2 h-3 w-32" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4 rounded" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-16" />
+                <Skeleton className="mt-2 h-3 w-28" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card><CardContent className="pt-6"><Skeleton className="h-64 w-full" /></CardContent></Card>
+          <Card><CardContent className="pt-6"><Skeleton className="h-64 w-full" /></CardContent></Card>
+        </div>
       </div>
     );
   }
@@ -49,21 +91,23 @@ export default function DashboardOverview() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t("dashboard")}</h1>
         <p className="text-muted-foreground">
           Khaled International Schools — {selectedLabel}
           {schoolFilter !== "all" && ` — ${schoolLabel}`}
         </p>
       </div>
 
+      {/* Sync status (admin only) */}
+      {can("admin.users") && <SyncStatusBanner />}
+
       {/* KPI row */}
       <SisKpiCards
-        totalStudents={schoolData.total_students}
         activeRegistrations={schoolData.active_registrations}
       />
 
       {/* Per-installment financial KPIs */}
-      {hasFinancials && (
+      {hasFinancials && can("fees.view") && (
         <TermFinancialCards termData={schoolData.financials.installments} />
       )}
 
@@ -74,7 +118,7 @@ export default function DashboardOverview() {
       </div>
 
       {/* Financial chart */}
-      {hasFinancials && (
+      {hasFinancials && can("fees.view") && (
         <FinancialChart data={schoolData.financials.chart} />
       )}
     </div>

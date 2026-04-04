@@ -50,13 +50,21 @@ interface CollectionStats {
   count: number;
 }
 
-/** Fetch counts for all SiS collections */
+/** Fetch counts for all SiS collections (cached 30 min, parallel) */
 export function useCollectionStats() {
   const [stats, setStats] = useState<CollectionStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const cacheKey = "ref:collectionStats";
+    const cached = getCached<CollectionStats[]>(cacheKey);
+    if (cached) {
+      setStats(cached);
+      setLoading(false);
+      return;
+    }
+
     (async () => {
       try {
         const db = getDb();
@@ -79,23 +87,25 @@ export function useCollectionStats() {
           { name: "Academic Years", collection: "academic_years" },
         ];
 
-        const results: CollectionStats[] = [];
+        // Run all count queries in parallel instead of sequentially
+        const results = await Promise.all(
+          collections.map(async (col) => {
+            try {
+              const snap = await getCountFromServer(
+                collection(db, col.collection)
+              );
+              return {
+                name: col.name,
+                collection: col.collection,
+                count: snap.data().count,
+              };
+            } catch {
+              return { ...col, count: 0 };
+            }
+          })
+        );
 
-        for (const col of collections) {
-          try {
-            const snap = await getCountFromServer(
-              collection(db, col.collection)
-            );
-            results.push({
-              name: col.name,
-              collection: col.collection,
-              count: snap.data().count,
-            });
-          } catch {
-            results.push({ ...col, count: 0 });
-          }
-        }
-
+        setCache(cacheKey, results);
         setStats(results);
       } catch (err: unknown) {
         console.error("Failed to fetch collection stats:", err);
@@ -121,7 +131,7 @@ export function useCollection<T extends { id: string }>(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (maxDocs <= 0) {
+    if (maxDocs <= 0 || !collectionName) {
       setData([]);
       setLoading(false);
       return;
@@ -164,7 +174,7 @@ export function useCollection<T extends { id: string }>(
 export function useFilteredCollection<T extends { id: string }>(
   collectionName: string,
   academicYear: string | null,
-  maxDocs = 10000,
+  maxDocs = 2000,
   yearField = "Academic_Year"
 ) {
   const [data, setData] = useState<T[]>([]);
@@ -280,6 +290,13 @@ export interface StudentDetail {
   nationality: string;
   section: string;
   subjects: { subject: string; grade: number }[];
+  /* Contextual "why" fields — present depending on report type */
+  absenceByMonth?: { month: string; days: number }[];
+  absenceReasons?: { reason: string; days: number }[];
+  balanceByTerm?: { term: string; charged: number; paid: number; balance: number }[];
+  examTrend?: { exam: string; avg: number }[];
+  failingSubjects?: { subject: string; grade: number }[];
+  classAvg?: number;
 }
 
 export interface SummarySchoolData {
@@ -497,6 +514,120 @@ export function useSummary(academicYear: string | null) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Quiz / Assessment Grades Summary                                  */
+/* ------------------------------------------------------------------ */
+
+export interface QuizSubjectRow {
+  code: string;
+  name: string;
+  records: number;
+  graded: number;
+  avg: number;
+  min: number;
+  max: number;
+}
+
+export interface QuizQuizRow {
+  code: string;
+  records: number;
+  graded: number;
+  avg: number;
+}
+
+export interface QuizSectionData {
+  sectionName: string;
+  records: number;
+  graded: number;
+  avg: number;
+  students: number;
+  bySubject: QuizSubjectRow[];
+}
+
+export interface QuizClassData {
+  className: string;
+  records: number;
+  graded: number;
+  avg: number;
+  students: number;
+  bySubject: QuizSubjectRow[];
+  bySection: Record<string, QuizSectionData>;
+}
+
+export interface QuizExamOverall {
+  records: number;
+  graded: number;
+  avg: number;
+  students: number;
+  bySubject: QuizSubjectRow[];
+  byQuiz: QuizQuizRow[];
+}
+
+export interface QuizExamData {
+  overall: QuizExamOverall;
+  byClass: Record<string, QuizClassData>;
+}
+
+export interface QuizSchoolSlice {
+  exams: { examCode: string; examName: string; records: number; graded: number; avg: number }[];
+  classes: { classCode: string; className: string }[];
+  sections: Record<string, { sectionCode: string; sectionName: string }[]>;
+  data: Record<string, QuizExamData>;
+}
+
+export interface QuizSummary {
+  academic_year: string;
+  updated_at: string;
+  all: QuizSchoolSlice;
+  "0021-01"?: QuizSchoolSlice;
+  "0021-02"?: QuizSchoolSlice;
+}
+
+export function useQuizSummary(academicYear: string | null) {
+  const [quizSummary, setQuizSummary] = useState<QuizSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!academicYear) {
+      setQuizSummary(null);
+      setLoading(false);
+      return;
+    }
+
+    const cacheKey = `summary:quiz:${academicYear}`;
+    const cached = getCached<QuizSummary>(cacheKey);
+    if (cached) {
+      setQuizSummary(cached);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    (async () => {
+      try {
+        const db = getDb();
+        const docRef = doc(db, "quiz_summaries", academicYear);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data() as QuizSummary;
+          setCache(cacheKey, data);
+          setQuizSummary(data);
+        } else {
+          setQuizSummary(null);
+        }
+      } catch (err: unknown) {
+        console.error("Failed to fetch quiz summary:", err);
+        setError(err instanceof Error ? err.message : "Failed to load quiz summary");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [academicYear]);
+
+  return { quizSummary, loading, error };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Cursor-based paginated collection hook                            */
 /* ------------------------------------------------------------------ */
 
@@ -526,8 +657,15 @@ export function usePaginatedCollection<T extends { id: string }>(
   // Stack of last-document cursors for each visited page
   const cursorsRef = useRef<(DocumentSnapshot | null)[]>([null]);
 
-  // Fetch count (filtered if year supplied)
+  // Fetch count (filtered if year supplied) — cached 30 min
   useEffect(() => {
+    const countCacheKey = `filt:count:${collectionName}:${filterYear || "all"}`;
+    const cachedCount = getCached<number>(countCacheKey);
+    if (cachedCount !== null) {
+      setTotalCount(cachedCount);
+      return;
+    }
+
     (async () => {
       try {
         const db = getDb();
@@ -542,7 +680,9 @@ export function usePaginatedCollection<T extends { id: string }>(
           q = collection(db, collectionName);
         }
         const snap = await getCountFromServer(q);
-        setTotalCount(snap.data().count);
+        const count = snap.data().count;
+        setCache(countCacheKey, count);
+        setTotalCount(count);
       } catch {
         /* count is non-critical */
       }
@@ -655,4 +795,65 @@ export function usePaginatedCollection<T extends { id: string }>(
     goFirst,
     setPageSize,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Delinquency student lists (lazy-loaded from separate Firestore docs) */
+/* ------------------------------------------------------------------ */
+export type DelinquencyStudent = {
+  studentNumber: string;
+  studentName: string;
+  className: string;
+  charged: number;
+  paid: number;
+  balance: number;
+  majorCode: string;
+  sectionCode: string;
+  sectionName: string;
+  familyNumber: string;
+  familyName: string;
+};
+
+export type DelinquencyStudentsData = {
+  fully_paid_students: DelinquencyStudent[];
+  zero_paid_students: DelinquencyStudent[];
+};
+
+export function useDelinquencyStudents(
+  year: string | null,
+  schoolFilter: string
+) {
+  const [data, setData] = useState<DelinquencyStudentsData | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetch = useCallback(async () => {
+    if (!year) return;
+    const filterKey = schoolFilter === "all" ? "all" : schoolFilter;
+    const cacheKey = `summary:delinquency_students_${year}_${filterKey}`;
+    const cached = getCached<DelinquencyStudentsData>(cacheKey);
+    if (cached) {
+      setData(cached);
+      return;
+    }
+    setLoading(true);
+    try {
+      const db = getDb();
+      const docRef = doc(db, "delinquency_students", `${year}_${filterKey}`);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const d = snap.data() as DelinquencyStudentsData;
+        setCache(cacheKey, d);
+        setData(d);
+      } else {
+        setData({ fully_paid_students: [], zero_paid_students: [] });
+      }
+    } catch (e) {
+      console.error("Error loading delinquency students:", e);
+      setData({ fully_paid_students: [], zero_paid_students: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [year, schoolFilter]);
+
+  return { data, loading, fetchStudents: fetch };
 }

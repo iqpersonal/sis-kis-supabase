@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyAdmin } from "@/lib/api-auth";
 
 /**
  * POST /api/ai-summary
@@ -12,6 +13,9 @@ import { NextRequest, NextResponse } from "next/server";
  * Falls back to a simple heuristic summary if no API key is configured.
  */
 export async function POST(req: NextRequest) {
+  const auth = await verifyAdmin(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const { reports } = (await req.json()) as {
       reports: {

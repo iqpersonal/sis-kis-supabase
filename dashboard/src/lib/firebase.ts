@@ -1,5 +1,11 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  getFirestore,
+  type Firestore,
+} from "firebase/firestore";
 import { getAuth, type Auth } from "firebase/auth";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
 
@@ -23,7 +29,19 @@ let _auth: Auth | undefined;
 let _analytics: Analytics | undefined;
 
 export function getDb(): Firestore {
-  if (!_db) _db = getFirestore(getFirebaseApp());
+  if (!_db) {
+    const app = getFirebaseApp();
+    // Check if Firestore was already initialized (e.g. by another import)
+    try {
+      _db = getFirestore(app);
+    } catch {
+      _db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    }
+  }
   return _db;
 }
 

@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Award, TrendingUp, CalendarOff, Clock } from "lucide-react";
+import { AnimatedCounter } from "@/components/dashboard/animated-counter";
 
 interface Props {
   totalExams: number;
@@ -26,27 +27,35 @@ export function AcademicKpiCards({
   const cards = [
     {
       title: "Exam Results",
-      value: totalExams.toLocaleString(),
+      value: totalExams,
       icon: Award,
       description: "Student results this year",
+      suffix: "",
+      decimals: 0,
     },
     {
       title: "Pass Rate",
-      value: `${passRate.toFixed(1)}%`,
+      value: passRate,
       icon: TrendingUp,
       description: passRate >= 90 ? "Excellent" : passRate >= 75 ? "Good" : "Needs attention",
+      suffix: "%",
+      decimals: 1,
     },
     {
       title: "Average Grade",
-      value: avgGrade.toFixed(1),
+      value: avgGrade,
       icon: Award,
       description: "Mean final average",
+      suffix: "",
+      decimals: 1,
     },
     {
       title: "Absence Days",
-      value: totalAbsenceDays.toLocaleString(),
+      value: totalAbsenceDays,
       icon: CalendarOff,
       description: `${totalTardy.toLocaleString()} tardy records`,
+      suffix: "",
+      decimals: 0,
     },
   ];
 
@@ -61,7 +70,9 @@ export function AcademicKpiCards({
             <c.icon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{c.value}</div>
+            <div className="text-2xl font-bold">
+              <AnimatedCounter value={c.value} suffix={c.suffix} decimals={c.decimals} />
+            </div>
             <p className="text-xs text-muted-foreground">{c.description}</p>
           </CardContent>
         </Card>

@@ -5,14 +5,23 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { useLanguage } from "@/context/language-context";
+import { useAuth } from "@/context/auth-context";
 import { RegistrationsByYearChart } from "@/components/dashboard/registrations-chart";
 import { NationalityPieChart } from "@/components/dashboard/nationality-pie-chart";
 import { FinancialChart } from "@/components/dashboard/financial-chart";
 import { TermFinancialCards } from "@/components/dashboard/term-financial-cards";
+import { GradeDistributionChart } from "@/components/dashboard/grade-distribution-chart";
+import { PassFailChart } from "@/components/dashboard/pass-fail-chart";
+import { AttendanceChart } from "@/components/dashboard/attendance-chart";
+import { ClassBreakdownTable } from "@/components/dashboard/class-breakdown-table";
+import { AcademicKpiCards } from "@/components/dashboard/academic-kpi-cards";
 
 export default function AnalyticsPage() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
+  const { t } = useLanguage();
+  const { can } = useAuth();
 
   // Single Firestore read — pre-aggregated summary document
   const { summary, loading: loadSummary } = useSummary(selectedYear);
@@ -45,26 +54,53 @@ export default function AnalyticsPage() {
     (i) => i.totalCharges > 0 || i.totalPaid > 0
   );
 
+  const acad = schoolData.academics;
+
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Analytics</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t("analytics")}</h1>
         <p className="text-muted-foreground">
-          Visual breakdown — {selectedLabel}
+          {t("visualBreakdown")} — {selectedLabel}
           {schoolFilter !== "all" && ` — ${schoolLabel}`}
         </p>
       </div>
 
-      {/* Charts */}
+      {/* Academic KPIs */}
+      <AcademicKpiCards
+        totalExams={acad.total_exams}
+        passRate={acad.pass_rate}
+        avgGrade={acad.avg_grade}
+        totalAbsenceDays={acad.total_absence_days}
+        totalTardy={acad.total_tardy}
+      />
+
+      {/* Charts Row 1: Registrations + Nationality */}
       <div className="grid gap-6 lg:grid-cols-2">
         <RegistrationsByYearChart data={summary.reg_counts_all_years} />
         <NationalityPieChart data={schoolData.nationalities} />
       </div>
 
-      {/* Per-installment Financial KPIs */}
-      {hasFinancials && <TermFinancialCards termData={schoolData.financials.installments} />}
+      {/* Charts Row 2: Grade Distribution + Pass/Fail */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <GradeDistributionChart data={acad.grade_distribution} />
+        <PassFailChart data={acad.pass_fail} />
+      </div>
 
-      {hasFinancials && (
+      {/* Charts Row 3: Attendance */}
+      {acad.attendance_by_month.length > 0 && (
+        <AttendanceChart data={acad.attendance_by_month} />
+      )}
+
+      {/* Class Breakdown Table */}
+      {acad.class_breakdown.length > 0 && (
+        <ClassBreakdownTable rows={acad.class_breakdown} />
+      )}
+
+      {/* Per-installment Financial KPIs */}
+      {hasFinancials && can("fees.view") && <TermFinancialCards termData={schoolData.financials.installments} />}
+
+      {hasFinancials && can("fees.view") && (
         <FinancialChart data={schoolData.financials.chart} />
       )}
     </div>

@@ -28,6 +28,7 @@ export function AiSummaryCard({ reports }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reports }),
       });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
       setSummary(data.summary);
     } catch {

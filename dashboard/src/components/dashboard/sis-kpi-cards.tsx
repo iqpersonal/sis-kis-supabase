@@ -7,33 +7,26 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Users, GraduationCap } from "lucide-react";
+import { AnimatedCounter } from "@/components/dashboard/animated-counter";
 
 interface Props {
-  totalStudents: number;
   activeRegistrations: number;
 }
 
 export function SisKpiCards({
-  totalStudents,
   activeRegistrations,
 }: Props) {
   const cards = [
     {
-      title: "Total Students",
-      value: totalStudents.toLocaleString(),
-      icon: Users,
-      description: "Active this year",
-    },
-    {
       title: "Active Registrations",
-      value: activeRegistrations.toLocaleString(),
+      value: activeRegistrations,
       icon: GraduationCap,
       description: "Current academic year",
     },
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-1 max-w-md">
       {cards.map((c) => (
         <Card key={c.title}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -43,7 +36,9 @@ export function SisKpiCards({
             <c.icon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{c.value}</div>
+            <div className="text-2xl font-bold">
+              <AnimatedCounter value={c.value} />
+            </div>
             <p className="text-xs text-muted-foreground">{c.description}</p>
           </CardContent>
         </Card>

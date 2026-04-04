@@ -107,6 +107,98 @@ export interface ChargeType {
   [key: string]: unknown;
 }
 
+/* ── Staff ────────────────────────────────────────────────────────── */
+
+export interface StaffMember {
+  id: string;
+  Staff_Number: string;
+  A_First_Name: string | null;
+  E_First_Name: string | null;
+  A_Father_Name: string | null;
+  E_Father_Name: string | null;
+  A_Family_Name: string | null;
+  E_Family_Name: string | null;
+  A_Full_Name: string | null;
+  E_Full_Name: string | null;
+  E_Mail: string | null;
+  Sex: string | null;
+  Birth_Date: string | null;
+  Primary_Nationality: string | null;
+  ID_Number: string | null;
+  Employee_Group_ID: string | null;
+  School_Code: string | null;
+  Branch_Code: string | null;
+  Position_Code: string | null;
+  Enrollment_Date: string | null;
+  Termination_Date: string | null;
+  is_active: boolean;
+  [key: string]: unknown;
+}
+
+export interface Department {
+  id: string;
+  Department_Code: string;
+  A_Department_Desc: string | null;
+  E_Department_Desc: string | null;
+  [key: string]: unknown;
+}
+
+/* ── IT Inventory ────────────────────────────────────────────────── */
+
+export type AssetType =
+  | "laptop"
+  | "desktop"
+  | "printer"
+  | "projector"
+  | "tablet"
+  | "phone"
+  | "network_device"
+  | "monitor"
+  | "other";
+
+export type AssetStatus =
+  | "active"
+  | "available"
+  | "maintenance"
+  | "retired"
+  | "lost";
+
+export type AssetCondition = "excellent" | "good" | "fair" | "poor";
+
+export interface ITAsset {
+  id: string;
+  asset_id: string;
+  asset_type: AssetType;
+  brand: string;
+  model: string;
+  serial_number: string;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  warranty_expiry: string | null;
+  status: AssetStatus;
+  condition: AssetCondition;
+  location: string;
+  branch: string;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  assigned_date: string | null;
+  notes: string;
+  specs: Record<string, string>;
+  created_at: string;
+  updated_by: string;
+}
+
+export interface ITAssetHistory {
+  id: string;
+  asset_id: string;
+  action: "assigned" | "returned" | "maintenance" | "status_change" | "created" | "updated";
+  from_staff: string | null;
+  to_staff: string | null;
+  timestamp: string;
+  performed_by: string;
+  notes: string;
+}
+
 /** Dashboard KPI summary (computed client-side from Firestore collections) */
 export interface DashboardStats {
   totalStudents: number;

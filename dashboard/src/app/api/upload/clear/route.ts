@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
+import { verifySuperAdmin } from "@/lib/api-auth";
 
 const COLLECTION = "reports";
 
@@ -9,7 +10,10 @@ const COLLECTION = "reports";
  * Clears all documents in the "reports" collection.
  * Useful before re-uploading fresh data.
  */
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const auth = await verifySuperAdmin(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const snapshot = await adminDb.collection(COLLECTION).get();
 

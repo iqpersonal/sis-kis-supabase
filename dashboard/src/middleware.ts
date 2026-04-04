@@ -17,8 +17,38 @@ import type { NextRequest } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Only guard /dashboard routes
-  if (pathname.startsWith("/dashboard")) {
+  // Guard /parent/dashboard routes (parents) — check BEFORE /dashboard
+  if (pathname.startsWith("/parent/dashboard")) {
+    const parentSession = request.cookies.get("__parent_session")?.value;
+
+    if (!parentSession) {
+      const loginUrl = new URL("/parent/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Guard /student/dashboard routes (students)
+  else if (pathname.startsWith("/student/dashboard")) {
+    const studentSession = request.cookies.get("__student_session")?.value;
+
+    if (!studentSession) {
+      const loginUrl = new URL("/student/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Guard /teacher/dashboard routes (teachers)
+  else if (pathname.startsWith("/teacher/dashboard")) {
+    const teacherSession = request.cookies.get("__teacher_session")?.value;
+
+    if (!teacherSession) {
+      const loginUrl = new URL("/teacher/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Guard /dashboard routes (admin)
+  else if (pathname.startsWith("/dashboard")) {
     const session = request.cookies.get("__session")?.value;
 
     if (!session) {
@@ -32,5 +62,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/parent/dashboard/:path*", "/student/dashboard/:path*", "/teacher/dashboard/:path*"],
 };

@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useAuth } from "@/context/auth-context";
+import { MAJOR_SCOPED_ROLES, type Role } from "@/lib/rbac";
 
 export type SchoolFilter = "all" | "0021-01" | "0021-02";
 
@@ -8,12 +10,15 @@ interface SchoolFilterCtx {
   schoolFilter: SchoolFilter;
   schoolLabel: string;
   setSchoolFilter: (f: SchoolFilter) => void;
+  /** True when the school filter is locked to the user's assigned major */
+  locked: boolean;
 }
 
 const SchoolFilterContext = createContext<SchoolFilterCtx>({
   schoolFilter: "all",
   schoolLabel: "All Schools",
   setSchoolFilter: () => {},
+  locked: false,
 });
 
 export const useSchoolFilter = () => useContext(SchoolFilterContext);
@@ -25,14 +30,32 @@ const LABELS: Record<SchoolFilter, string> = {
 };
 
 export function SchoolFilterProvider({ children }: { children: ReactNode }) {
-  const [schoolFilter, setSchoolFilter] = useState<SchoolFilter>("all");
+  const { role, assignedMajor } = useAuth();
+  const locked = !!role && MAJOR_SCOPED_ROLES.includes(role as Role) && !!assignedMajor;
+  const forcedValue = (locked ? assignedMajor : null) as SchoolFilter | null;
+
+  const [schoolFilter, setSchoolFilterInternal] = useState<SchoolFilter>(
+    forcedValue ?? "all"
+  );
+
+  // When auth loads and the user has a major-scoped role, lock the filter
+  useEffect(() => {
+    if (forcedValue) setSchoolFilterInternal(forcedValue);
+  }, [forcedValue]);
+
+  const setSchoolFilter = useCallback((f: SchoolFilter) => {
+    if (locked) return; // prevent changes for locked roles
+    setSchoolFilterInternal(f);
+  }, [locked]);
 
   const schoolLabel = LABELS[schoolFilter];
 
+  const value = useMemo(() => ({
+    schoolFilter, schoolLabel, setSchoolFilter, locked,
+  }), [schoolFilter, schoolLabel, setSchoolFilter, locked]);
+
   return (
-    <SchoolFilterContext.Provider
-      value={{ schoolFilter, schoolLabel, setSchoolFilter }}
-    >
+    <SchoolFilterContext.Provider value={value}>
       {children}
     </SchoolFilterContext.Provider>
   );

@@ -2,10 +2,13 @@
 
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { useAuth } from "@/context/auth-context";
 import { StudentDetailDialog } from "@/components/student-detail-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -26,7 +29,9 @@ import {
   Users,
   TrendingUp,
   AlertTriangle,
+  Download,
 } from "lucide-react";
+import { exportToCSV } from "@/lib/export-csv";
 import {
   BarChart,
   Bar,
@@ -45,6 +50,7 @@ export default function AttendancePage() {
     loading: yearLoading,
   } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
+  const { can } = useAuth();
   const { summary, loading: loadSummary } = useSummary(selectedYear);
 
   const loading = yearLoading || loadSummary;
@@ -102,14 +108,40 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Attendance & Conduct
-        </h1>
-        <p className="text-muted-foreground">
-          Absence & tardy analysis — {selectedLabel}
-          {schoolFilter !== "all" && ` — ${schoolLabel}`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Attendance & Conduct
+          </h1>
+          <p className="text-muted-foreground">
+            Absence & tardy analysis — {selectedLabel}
+            {schoolFilter !== "all" && ` — ${schoolLabel}`}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {att.top_absentees.length > 0 && can("bulk_export.view") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                exportToCSV(
+                  `attendance-${selectedYear}`,
+                  ["#", "Student Name", "Student Number", "Class", "Absence Days"],
+                  att.top_absentees.map((s, i) => [i + 1, s.studentName, s.studentNumber, s.className, s.days]),
+                )
+              }
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          )}
+          <Link href="/dashboard/attendance/daily">
+            <Button>
+              <CalendarOff className="mr-2 h-4 w-4" />
+              Daily Attendance
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* KPI Cards */}

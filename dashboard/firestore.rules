@@ -1,7 +1,97 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow authenticated users to read all SiS collections
+    // ── Parent portal (custom auth, not Firebase Auth) ──
+    // families: readable for login lookup but EXCLUDE password field via client select()
+    // NOTE: Firestore rules cannot filter fields — the API route handles auth server-side.
+    // Restrict to authenticated reads where possible; families needs public for parent login flow.
+    match /families/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Student data — read-only for portals (parent/student/teacher)
+    match /students/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /student_registrations/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /student_progress/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /academic_years/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Diploma verifications — public read, admin-only write
+    match /diploma_verifications/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ["super_admin", "admin"];
+    }
+
+    // Book Sales collections — require Firebase Auth with admin role
+    match /book_catalog/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ["super_admin", "admin"];
+    }
+    match /book_bundles/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ["super_admin", "admin"];
+    }
+    match /book_sales/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ["super_admin", "admin"];
+    }
+    match /book_sales_meta/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ["super_admin", "admin"];
+    }
+
+    // Quiz collections — read public (for student quiz-taking), write requires admin auth
+    match /quiz_questions/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /quiz_assignments/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /quiz_sessions/{docId} {
+      allow read: if true;
+      // Sessions created by students taking quizzes — require some auth or validated fields
+      allow write: if request.auth != null
+        || (request.resource.data.keys().hasAll(["student_number", "assignment_id"])
+            && request.resource.data.student_number is string
+            && request.resource.data.assignment_id is string);
+    }
+    match /quiz_results/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Push tokens — allow parent/teacher write for notification registration
+    match /push_tokens/{docId} {
+      allow read: if request.auth != null;
+      allow write: if true;
+    }
+
+    // Messages — allow read for all (parents check messages), write for read receipts
+    match /messages/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // All other collections require Firebase Auth (read-only)
     match /{collection}/{docId} {
       allow read: if request.auth != null;
       allow write: if false;

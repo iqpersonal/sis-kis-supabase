@@ -1,0 +1,728 @@
+import { NextRequest, NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
+import { CACHE_SHORT, CACHE_MEDIUM } from "@/lib/cache-headers";
+import { verifyAuth } from "@/lib/api-auth";
+
+/**
+ * Library Management API
+ *
+ * GET /api/library
+ *   ?action=books          → list all books (catalog)
+ *   ?action=borrowings     → list current borrowings (optionally filtered)
+ *   ?action=student&studentNumber=XXX → borrowings for a specific student
+ *   ?action=stats          → summary statistics
+ *   ?action=settings       → library settings (limits, loan days, fines)
+ *   ?action=reports&type=X → library reports (most_borrowed, by_class, monthly_trend, top_readers, inventory)
+ *
+ * POST /api/library
+ *   { action: "checkout", studentNumber, studentName, bookId, dueDate? }
+ *   { action: "checkin",  borrowingId, condition?, notes? }
+ *   { action: "add_book", ...bookFields }
+ *   { action: "update_book", bookId, ...fields }
+ *   { action: "delete_book", bookId }
+ *   { action: "mark_lost", borrowingId }
+ */
+
+/* ── Settings helper ─────────────────────────────────────────── */
+interface LibSettings {
+  default_loan_days: number;
+  max_books_per_student: number;
+  overdue_fine_per_day: number;
+  lost_book_fee: number;
+  grace_period_days: number;
+  conditions: string[];
+}
+const DEFAULT_SETTINGS: LibSettings = {
+  default_loan_days: 14,
+  max_books_per_student: 3,
+  overdue_fine_per_day: 0,
+  lost_book_fee: 50,
+  grace_period_days: 0,
+  conditions: ["excellent", "good", "fair", "poor", "damaged"],
+};
+async function getSettings(): Promise<LibSettings> {
+  try {
+    const doc = await adminDb.collection("app_config").doc("library_settings").get();
+    return doc.exists ? { ...DEFAULT_SETTINGS, ...doc.data() } as LibSettings : DEFAULT_SETTINGS;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+// ── GET ────────────────────────────────────────────────────────
+export async function GET(req: NextRequest) {
+  const action = req.nextUrl.searchParams.get("action") || "stats";
+
+  try {
+    // ── Stats ──
+    if (action === "stats") {
+      const settings = await getSettings();
+      const [booksSnap, borrowSnap, overdueSnap] = await Promise.all([
+        adminDb.collection("library_books").count().get(),
+        adminDb
+          .collection("library_borrowings")
+          .where("status", "==", "borrowed")
+          .count()
+          .get(),
+        adminDb
+          .collection("library_borrowings")
+          .where("status", "==", "overdue")
+          .count()
+          .get(),
+      ]);
+
+      const totalBooks = booksSnap.data().count;
+      const activeBorrowings =
+        borrowSnap.data().count + overdueSnap.data().count;
+      const overdueCount = overdueSnap.data().count;
+
+      // total copies
+      const copiesSnap = await adminDb.collection("library_copies").count().get();
+      const availSnap = await adminDb
+        .collection("library_copies")
+        .where("status", "==", "available")
+        .count()
+        .get();
+      const lostSnap = await adminDb
+        .collection("library_copies")
+        .where("status", "==", "lost")
+        .count()
+        .get();
+      const damagedSnap = await adminDb
+        .collection("library_copies")
+        .where("status", "==", "damaged")
+        .count()
+        .get();
+
+      // Calculate total outstanding fines
+      let totalFines = 0;
+      if (settings.overdue_fine_per_day > 0) {
+        const overdueDocsSnap = await adminDb
+          .collection("library_borrowings")
+          .where("status", "==", "overdue")
+          .get();
+        const now = Date.now();
+        for (const doc of overdueDocsSnap.docs) {
+          const dueDate = doc.data().due_date;
+          if (dueDate) {
+            const overdueDays = Math.max(0, Math.ceil((now - new Date(dueDate).getTime()) / 86400000) - settings.grace_period_days);
+            totalFines += overdueDays * settings.overdue_fine_per_day;
+          }
+        }
+      }
+
+      // Count lost book fees
+      const lostBorrowSnap = await adminDb
+        .collection("library_borrowings")
+        .where("status", "==", "lost")
+        .count()
+        .get();
+      totalFines += lostBorrowSnap.data().count * settings.lost_book_fee;
+
+      return NextResponse.json({
+        total_books: totalBooks,
+        total_copies: copiesSnap.data().count,
+        available_copies: availSnap.data().count,
+        active_borrowings: activeBorrowings,
+        overdue: overdueCount,
+        lost: lostSnap.data().count,
+        damaged: damagedSnap.data().count,
+        total_fines: Math.round(totalFines * 100) / 100,
+        settings,
+      }, { headers: CACHE_SHORT });
+    }
+
+    // ── Books catalog ──
+    if (action === "books") {
+      const snap = await adminDb
+        .collection("library_books")
+        .orderBy("title")
+        .get();
+
+      const books = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return NextResponse.json({ books }, { headers: CACHE_MEDIUM });
+    }
+
+    // ── Student borrowings ──
+    if (action === "student") {
+      const studentNumber = req.nextUrl.searchParams.get("studentNumber");
+      if (!studentNumber) {
+        return NextResponse.json(
+          { error: "studentNumber is required" },
+          { status: 400 }
+        );
+      }
+
+      // Mark overdue borrowings first
+      await markOverdue();
+
+      const snap = await adminDb
+        .collection("library_borrowings")
+        .where("student_number", "==", studentNumber.trim())
+        .orderBy("borrow_date", "desc")
+        .limit(100)
+        .get();
+
+      const borrowings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return NextResponse.json({ borrowings }, { headers: CACHE_SHORT });
+    }
+
+    // ── All borrowings ──
+    if (action === "borrowings") {
+      const statusFilter = req.nextUrl.searchParams.get("status"); // borrowed | returned | overdue | all
+
+      await markOverdue();
+
+      let q: FirebaseFirestore.Query = adminDb
+        .collection("library_borrowings")
+        .orderBy("borrow_date", "desc");
+
+      if (statusFilter && statusFilter !== "all") {
+        q = adminDb
+          .collection("library_borrowings")
+          .where("status", "==", statusFilter)
+          .orderBy("borrow_date", "desc");
+      }
+
+      const snap = await q.limit(500).get();
+      const borrowings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return NextResponse.json({ borrowings }, { headers: CACHE_SHORT });
+    }
+
+    // ── Reports ──
+    if (action === "reports") {
+      const reportType = req.nextUrl.searchParams.get("type") || "most_borrowed";
+
+      if (reportType === "most_borrowed") {
+        const snap = await adminDb.collection("library_borrowings").get();
+        const counts: Record<string, { title: string; count: number }> = {};
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          const key = d.book_id || "unknown";
+          if (!counts[key]) counts[key] = { title: d.book_title || "Unknown", count: 0 };
+          counts[key].count++;
+        }
+        const ranked = Object.entries(counts)
+          .map(([bookId, v]) => ({ bookId, title: v.title, borrowCount: v.count }))
+          .sort((a, b) => b.borrowCount - a.borrowCount)
+          .slice(0, 20);
+        return NextResponse.json({ report: "most_borrowed", data: ranked }, { headers: CACHE_SHORT });
+      }
+
+      if (reportType === "monthly_trend") {
+        const snap = await adminDb.collection("library_borrowings").get();
+        const months: Record<string, { borrowed: number; returned: number }> = {};
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          const month = (d.borrow_date || "").slice(0, 7);
+          if (!month) continue;
+          if (!months[month]) months[month] = { borrowed: 0, returned: 0 };
+          months[month].borrowed++;
+          if (d.status === "returned") months[month].returned++;
+        }
+        const sorted = Object.entries(months)
+          .map(([month, v]) => ({ month, ...v }))
+          .sort((a, b) => a.month.localeCompare(b.month))
+          .slice(-12);
+        return NextResponse.json({ report: "monthly_trend", data: sorted }, { headers: CACHE_SHORT });
+      }
+
+      if (reportType === "top_readers") {
+        const snap = await adminDb.collection("library_borrowings").get();
+        const readers: Record<string, { name: string; count: number }> = {};
+        for (const doc of snap.docs) {
+          const d = doc.data();
+          const sn = d.student_number || "unknown";
+          if (!readers[sn]) readers[sn] = { name: d.student_name || sn, count: 0 };
+          readers[sn].count++;
+        }
+        const ranked = Object.entries(readers)
+          .map(([studentNumber, v]) => ({ studentNumber, studentName: v.name, borrowCount: v.count }))
+          .sort((a, b) => b.borrowCount - a.borrowCount)
+          .slice(0, 20);
+        return NextResponse.json({ report: "top_readers", data: ranked }, { headers: CACHE_SHORT });
+      }
+
+      if (reportType === "by_category") {
+        const booksSnap2 = await adminDb.collection("library_books").get();
+        const bookCats: Record<string, string> = {};
+        const catCopies: Record<string, { total: number; available: number }> = {};
+        for (const doc of booksSnap2.docs) {
+          const d = doc.data();
+          bookCats[doc.id] = d.category || "Other";
+          const cat = d.category || "Other";
+          if (!catCopies[cat]) catCopies[cat] = { total: 0, available: 0 };
+          catCopies[cat].total += d.total_copies || 0;
+          catCopies[cat].available += d.available_copies || 0;
+        }
+        const borrowSnap2 = await adminDb.collection("library_borrowings").get();
+        const catBorrows: Record<string, number> = {};
+        for (const doc of borrowSnap2.docs) {
+          const cat = bookCats[doc.data().book_id] || "Other";
+          catBorrows[cat] = (catBorrows[cat] || 0) + 1;
+        }
+        const data = Object.keys({ ...catCopies, ...catBorrows }).map((cat) => ({
+          category: cat,
+          totalCopies: catCopies[cat]?.total || 0,
+          availableCopies: catCopies[cat]?.available || 0,
+          totalBorrows: catBorrows[cat] || 0,
+        })).sort((a, b) => b.totalBorrows - a.totalBorrows);
+        return NextResponse.json({ report: "by_category", data }, { headers: CACHE_SHORT });
+      }
+
+      if (reportType === "overdue_detail") {
+        const settings = await getSettings();
+        await markOverdue();
+        const snap = await adminDb
+          .collection("library_borrowings")
+          .where("status", "==", "overdue")
+          .orderBy("due_date", "asc")
+          .get();
+        const now = Date.now();
+        const data = snap.docs.map((doc) => {
+          const d = doc.data();
+          const dueMs = new Date(d.due_date).getTime();
+          const overdueDays = Math.max(0, Math.ceil((now - dueMs) / 86400000) - settings.grace_period_days);
+          const fine = overdueDays * settings.overdue_fine_per_day;
+          return {
+            id: doc.id,
+            student_number: d.student_number,
+            student_name: d.student_name,
+            book_title: d.book_title,
+            borrow_date: d.borrow_date,
+            due_date: d.due_date,
+            overdue_days: overdueDays,
+            fine: Math.round(fine * 100) / 100,
+          };
+        });
+        return NextResponse.json({
+          report: "overdue_detail",
+          data,
+          total_fines: data.reduce((s, r) => s + r.fine, 0),
+        }, { headers: CACHE_SHORT });
+      }
+
+      return NextResponse.json({ error: "Invalid report type" }, { status: 400 });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (err) {
+    console.error("Library GET error:", err);
+    return NextResponse.json(
+      { error: "Failed to fetch library data" },
+      { status: 500 }
+    );
+  }
+}
+
+// ── POST ───────────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  const auth = await verifyAuth(req);
+  if (!auth.ok) return auth.response;
+
+  try {
+    const body = await req.json();
+    const { action } = body;
+
+    // ── Checkout ──
+    if (action === "checkout") {
+      const { studentNumber, studentName, bookId } = body;
+      if (!studentNumber || !bookId) {
+        return NextResponse.json(
+          { error: "studentNumber and bookId are required" },
+          { status: 400 }
+        );
+      }
+
+      const settings = await getSettings();
+
+      // Enforce borrowing limit
+      const activeSnap = await adminDb
+        .collection("library_borrowings")
+        .where("student_number", "==", String(studentNumber).trim())
+        .where("status", "in", ["borrowed", "overdue"])
+        .count()
+        .get();
+      if (activeSnap.data().count >= settings.max_books_per_student) {
+        return NextResponse.json(
+          { error: `Student already has ${activeSnap.data().count} active borrowing(s). Maximum is ${settings.max_books_per_student}.` },
+          { status: 400 }
+        );
+      }
+
+      // Auto-calculate due date if not provided
+      let dueDate = body.dueDate;
+      if (!dueDate) {
+        const d = new Date();
+        d.setDate(d.getDate() + settings.default_loan_days);
+        dueDate = d.toISOString();
+      }
+
+      // Get book info
+      const bookDoc = await adminDb
+        .collection("library_books")
+        .doc(bookId)
+        .get();
+      if (!bookDoc.exists) {
+        return NextResponse.json(
+          { error: "Book not found" },
+          { status: 404 }
+        );
+      }
+      const bookData = bookDoc.data()!;
+
+      if ((bookData.available_copies || 0) <= 0) {
+        return NextResponse.json(
+          { error: "No copies available" },
+          { status: 400 }
+        );
+      }
+
+      // Find an available copy
+      const copySnap = await adminDb
+        .collection("library_copies")
+        .where("book_id", "==", bookId)
+        .where("status", "==", "available")
+        .limit(1)
+        .get();
+
+      if (copySnap.empty) {
+        return NextResponse.json(
+          { error: "No physical copy available" },
+          { status: 400 }
+        );
+      }
+
+      const batch = adminDb.batch();
+
+      // Create borrowing record
+      const borrowRef = adminDb.collection("library_borrowings").doc();
+      batch.set(borrowRef, {
+        student_number: String(studentNumber).trim(),
+        student_name: studentName || "",
+        book_id: bookId,
+        book_title: bookData.title || "",
+        book_title_ar: bookData.title_ar || "",
+        author: bookData.author || "",
+        copy_id: copySnap.docs[0].id,
+        borrow_date: new Date().toISOString(),
+        due_date: dueDate,
+        return_date: null,
+        status: "borrowed",
+        notes: body.notes || "",
+        checked_out_by: body.checkedOutBy || "admin",
+        created_at: FieldValue.serverTimestamp(),
+      });
+
+      // Update copy status
+      batch.update(copySnap.docs[0].ref, { status: "borrowed" });
+
+      // Decrement available copies
+      batch.update(bookDoc.ref, {
+        available_copies: FieldValue.increment(-1),
+      });
+
+      await batch.commit();
+
+      return NextResponse.json({
+        success: true,
+        borrowingId: borrowRef.id,
+        message: `Checked out "${bookData.title}" to student ${studentNumber}`,
+      });
+    }
+
+    // ── Checkin ──
+    if (action === "checkin") {
+      const { borrowingId, condition, notes } = body;
+      if (!borrowingId) {
+        return NextResponse.json(
+          { error: "borrowingId is required" },
+          { status: 400 }
+        );
+      }
+
+      const borrowDoc = await adminDb
+        .collection("library_borrowings")
+        .doc(borrowingId)
+        .get();
+      if (!borrowDoc.exists) {
+        return NextResponse.json(
+          { error: "Borrowing record not found" },
+          { status: 404 }
+        );
+      }
+
+      const borrowData = borrowDoc.data()!;
+      if (borrowData.status === "returned") {
+        return NextResponse.json(
+          { error: "Already returned" },
+          { status: 400 }
+        );
+      }
+
+      // Calculate fine if overdue
+      const settings = await getSettings();
+      let fine = 0;
+      const now = Date.now();
+      const dueMs = new Date(borrowData.due_date).getTime();
+      if (now > dueMs) {
+        const overdueDays = Math.max(0, Math.ceil((now - dueMs) / 86400000) - settings.grace_period_days);
+        fine = overdueDays * settings.overdue_fine_per_day;
+      }
+
+      const batch = adminDb.batch();
+
+      // Update borrowing
+      const returnUpdate: Record<string, unknown> = {
+        status: "returned",
+        return_date: new Date().toISOString(),
+        return_condition: condition || null,
+        fine: Math.round(fine * 100) / 100,
+      };
+      if (notes) returnUpdate.return_notes = notes;
+      batch.update(borrowDoc.ref, returnUpdate);
+
+      // Update copy status and condition
+      if (borrowData.copy_id) {
+        const copyRef = adminDb
+          .collection("library_copies")
+          .doc(borrowData.copy_id);
+        const copyUpdate: Record<string, unknown> = { status: "available" };
+        if (condition) copyUpdate.condition = condition;
+        batch.update(copyRef, copyUpdate);
+      }
+
+      // Increment available copies on book
+      if (borrowData.book_id) {
+        const bookRef = adminDb
+          .collection("library_books")
+          .doc(borrowData.book_id);
+        batch.update(bookRef, {
+          available_copies: FieldValue.increment(1),
+        });
+      }
+
+      await batch.commit();
+
+      return NextResponse.json({
+        success: true,
+        message: `Checked in "${borrowData.book_title}"`,
+        fine,
+        condition: condition || null,
+      });
+    }
+
+    // ── Mark Lost ──
+    if (action === "mark_lost") {
+      const { borrowingId } = body;
+      if (!borrowingId) {
+        return NextResponse.json({ error: "borrowingId is required" }, { status: 400 });
+      }
+
+      const borrowDoc = await adminDb
+        .collection("library_borrowings")
+        .doc(borrowingId)
+        .get();
+      if (!borrowDoc.exists) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const borrowData = borrowDoc.data()!;
+      if (borrowData.status === "returned" || borrowData.status === "lost") {
+        return NextResponse.json({ error: "Invalid status for marking lost" }, { status: 400 });
+      }
+
+      const settings = await getSettings();
+      const batch = adminDb.batch();
+
+      batch.update(borrowDoc.ref, {
+        status: "lost",
+        lost_date: new Date().toISOString(),
+        fine: settings.lost_book_fee,
+      });
+
+      if (borrowData.copy_id) {
+        batch.update(
+          adminDb.collection("library_copies").doc(borrowData.copy_id),
+          { status: "lost" }
+        );
+      }
+
+      await batch.commit();
+
+      return NextResponse.json({
+        success: true,
+        message: `Marked "${borrowData.book_title}" as lost. Fee: ${settings.lost_book_fee} SAR`,
+        fine: settings.lost_book_fee,
+      });
+    }
+
+    // ── Add Book ──
+    if (action === "add_book") {
+      const { title, title_ar, author, isbn, category, language, publication_year, publisher, total_copies } = body;
+      if (!title) {
+        return NextResponse.json(
+          { error: "title is required" },
+          { status: 400 }
+        );
+      }
+
+      const copies = total_copies || 1;
+      const bookRef = adminDb.collection("library_books").doc();
+      await bookRef.set({
+        title,
+        title_ar: title_ar || "",
+        author: author || "",
+        isbn: isbn || "",
+        category: category || "",
+        language: language || "English",
+        publication_year: publication_year || null,
+        publisher: publisher || "",
+        total_copies: copies,
+        available_copies: copies,
+        cover_url: "",
+        created_at: FieldValue.serverTimestamp(),
+      });
+
+      // Create physical copy records
+      const batch = adminDb.batch();
+      for (let i = 1; i <= copies; i++) {
+        const copyRef = adminDb.collection("library_copies").doc();
+        batch.set(copyRef, {
+          book_id: bookRef.id,
+          barcode: `KIS-${bookRef.id.slice(0, 6).toUpperCase()}-${String(i).padStart(3, "0")}`,
+          status: "available",
+          location: "Main Library",
+          condition: "good",
+          created_at: FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+
+      return NextResponse.json({
+        success: true,
+        bookId: bookRef.id,
+        message: `Added "${title}" with ${copies} copies`,
+      });
+    }
+
+    // ── Update Book ──
+    if (action === "update_book") {
+      const { bookId, ...fields } = body;
+      if (!bookId) {
+        return NextResponse.json({ error: "bookId is required" }, { status: 400 });
+      }
+      const bookRef = adminDb.collection("library_books").doc(bookId);
+      const bookDoc = await bookRef.get();
+      if (!bookDoc.exists) {
+        return NextResponse.json({ error: "Book not found" }, { status: 404 });
+      }
+
+      const allowed = ["title", "title_ar", "author", "isbn", "category", "language", "publication_year", "publisher"];
+      const updates: Record<string, unknown> = { updated_at: FieldValue.serverTimestamp() };
+      for (const key of allowed) {
+        if (fields[key] !== undefined) updates[key] = fields[key];
+      }
+      await bookRef.update(updates);
+      return NextResponse.json({ success: true, message: `Updated "${fields.title || bookDoc.data()!.title}"` });
+    }
+
+    // ── Renew (extend due date) ──
+    if (action === "renew") {
+      const { borrowingId } = body;
+      if (!borrowingId) {
+        return NextResponse.json({ error: "borrowingId is required" }, { status: 400 });
+      }
+      const borrowDoc = await adminDb.collection("library_borrowings").doc(borrowingId).get();
+      if (!borrowDoc.exists) {
+        return NextResponse.json({ error: "Borrowing not found" }, { status: 404 });
+      }
+      const borrowData = borrowDoc.data()!;
+      if (borrowData.status === "returned" || borrowData.status === "lost") {
+        return NextResponse.json({ error: "Cannot renew a returned or lost book" }, { status: 400 });
+      }
+      const settings = await getSettings();
+      const newDue = new Date();
+      newDue.setDate(newDue.getDate() + settings.default_loan_days);
+      await borrowDoc.ref.update({
+        due_date: newDue.toISOString(),
+        status: "borrowed",
+        renewed_at: new Date().toISOString(),
+      });
+      return NextResponse.json({
+        success: true,
+        message: `Renewed until ${newDue.toLocaleDateString()}`,
+        new_due_date: newDue.toISOString(),
+      });
+    }
+
+    // ── Delete Book ──
+    if (action === "delete_book") {
+      const { bookId } = body;
+      if (!bookId) {
+        return NextResponse.json(
+          { error: "bookId is required" },
+          { status: 400 }
+        );
+      }
+
+      // Check for active borrowings
+      const activeSnap = await adminDb
+        .collection("library_borrowings")
+        .where("book_id", "==", bookId)
+        .where("status", "==", "borrowed")
+        .limit(1)
+        .get();
+
+      if (!activeSnap.empty) {
+        return NextResponse.json(
+          { error: "Cannot delete book with active borrowings" },
+          { status: 400 }
+        );
+      }
+
+      // Delete copies
+      const copiesSnap = await adminDb
+        .collection("library_copies")
+        .where("book_id", "==", bookId)
+        .get();
+
+      const batch = adminDb.batch();
+      copiesSnap.docs.forEach((d) => batch.delete(d.ref));
+      batch.delete(adminDb.collection("library_books").doc(bookId));
+      await batch.commit();
+
+      return NextResponse.json({ success: true, message: "Book deleted" });
+    }
+
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (err) {
+    console.error("Library POST error:", err);
+    return NextResponse.json(
+      { error: "Failed to process library request" },
+      { status: 500 }
+    );
+  }
+}
+
+/* ── Helper: mark overdue borrowings ──────────────────────────── */
+async function markOverdue() {
+  const now = new Date().toISOString();
+  const snap = await adminDb
+    .collection("library_borrowings")
+    .where("status", "==", "borrowed")
+    .get();
+
+  const batch = adminDb.batch();
+  let updated = 0;
+  for (const doc of snap.docs) {
+    const dueDate = doc.data().due_date;
+    if (dueDate && dueDate < now) {
+      batch.update(doc.ref, { status: "overdue" });
+      updated++;
+    }
+  }
+  if (updated > 0) {
+    await batch.commit();
+  }
+}

@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { useAuth } from "@/context/auth-context";
 import { StudentDetailDialog } from "@/components/student-detail-dialog";
 import {
   Card,
@@ -21,6 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Trophy, Star, Users, Percent } from "lucide-react";
+import { Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToCSV } from "@/lib/export-csv";
 import {
   BarChart,
   Bar,
@@ -34,6 +38,7 @@ import {
 export default function HonorRollPage() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
+  const { can } = useAuth();
   const { summary, loading: loadSummary } = useSummary(selectedYear);
 
   const loading = yearLoading || loadSummary;
@@ -105,12 +110,30 @@ export default function HonorRollPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Honor Roll</h1>
-        <p className="text-muted-foreground">
-          Top-performing students (avg &ge; 95) — {selectedLabel}
-          {schoolFilter !== "all" && ` — ${schoolLabel}`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Honor Roll</h1>
+          <p className="text-muted-foreground">
+            Top-performing students (avg &ge; 95) — {selectedLabel}
+            {schoolFilter !== "all" && ` — ${schoolLabel}`}
+          </p>
+        </div>
+        {hr.top_students.length > 0 && can("bulk_export.view") && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportToCSV(
+                `honor-roll-${selectedYear}`,
+                ["#", "Student Name", "Student Number", "Class", "Average", "Class Rank", "Section Rank"],
+                hr.top_students.map((s, i) => [i + 1, s.studentName, s.studentNumber, s.className, s.avg, s.classRank, s.secRank]),
+              )
+            }
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        )}
       </div>
 
       {/* KPI Cards */}

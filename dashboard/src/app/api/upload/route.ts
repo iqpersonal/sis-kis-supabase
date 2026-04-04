@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { parse } from "csv-parse/sync";
+import { verifySuperAdmin } from "@/lib/api-auth";
 
 const COLLECTION = "reports";
 const BATCH_SIZE = 500;
@@ -15,6 +16,9 @@ const BATCH_SIZE = 500;
  * running the Python extraction first.
  */
 export async function POST(req: NextRequest) {
+  const auth = await verifySuperAdmin(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;

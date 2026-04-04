@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Home } from "lucide-react";
 
 export default function LoginPage() {
   return (
@@ -51,8 +52,14 @@ function LoginForm() {
       } else {
         await signIn(email, password);
       }
-      // Set lightweight session cookie so middleware lets us through
-      document.cookie = `__session=1; path=/; max-age=${60 * 60 * 24 * 7}`;
+      // Store the Firebase ID token in a session cookie for API route auth
+      const { getFirebaseAuth } = await import("@/lib/firebase");
+      const idToken = await getFirebaseAuth().currentUser?.getIdToken();
+      if (idToken) {
+        document.cookie = `__session=${idToken}; path=/; max-age=${60 * 60}; SameSite=Lax; Secure`;
+      } else {
+        document.cookie = `__session=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+      }
       router.push(redirect);
     } catch (err: unknown) {
       setError(
@@ -65,6 +72,12 @@ function LoginForm() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
+      <div className="absolute top-4 left-4">
+        <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Home className="h-4 w-4" />
+          Home
+        </Link>
+      </div>
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">

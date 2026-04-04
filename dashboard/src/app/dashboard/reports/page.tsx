@@ -2,8 +2,9 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { usePaginatedCollection, useFilteredCollection, useCollection } from "@/hooks/use-sis-data";
+import { useClassNames } from "@/hooks/use-classes";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
 import { PaginationControls } from "@/components/ui/pagination-controls";
@@ -17,17 +18,125 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Filter } from "lucide-react";
+import { Search, Filter, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/context/language-context";
+import { getDb } from "@/lib/firebase";
+import { collection, query, where, getDocs } from "firebase/firestore";
 
 type DocRecord = Record<string, unknown> & { id: string };
 type StatusFilter = "all" | "active" | "withdrawn";
 
+const EXCLUDED_CLASS_CODES = new Set(["34", "51"]);
+
 export default function StudentsPage() {
+  const { t } = useLanguage();
   const { selectedYear, selectedLabel } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
   const [searchMode, setSearchMode] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [classFilter, setClassFilter] = useState("all");
+  const [sectionFilter, setSectionFilter] = useState("all");
+
+  /* ─── Class / Section dropdown data ─── */
+  const { classNameMap } = useClassNames();
+  const [classSections, setClassSections] = useState<
+    { classCode: string; sectionCode: string; sectionName: string }[]
+  >([]);
+
+  // Load sections when school filter changes
+  useEffect(() => {
+    const school = schoolFilter === "all" ? "" : schoolFilter;
+    if (!school) {
+      setClassSections([]);
+      setClassFilter("all");
+      setSectionFilter("all");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const q = query(
+          collection(getDb(), "sections"),
+          where("Academic_Year", "==", selectedYear || "25-26"),
+          where("Major_Code", "==", school)
+        );
+        const snap = await getDocs(q);
+        if (cancelled) return;
+        const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          const classCode = String(data.Class_Code || "");
+          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
+            items.push({
+              classCode,
+              sectionCode: String(data.Section_Code),
+              sectionName: String(data.E_Section_Name || data.Section_Code),
+            });
+          }
+        });
+        items.sort((a, b) => {
+          const nameA = classNameMap[a.classCode] || a.classCode;
+          const nameB = classNameMap[b.classCode] || b.classCode;
+          const numA = parseInt(nameA.replace(/\D/g, "")) || 0;
+          const numB = parseInt(nameB.replace(/\D/g, "")) || 0;
+          if (numA !== numB) return numA - numB;
+          return a.sectionName.localeCompare(b.sectionName);
+        });
+        setClassSections(items);
+      } catch (err) {
+        console.error("Failed to load sections:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [schoolFilter, classNameMap, selectedYear]);
+
+  // Reset class/section when school changes
+  useEffect(() => {
+    setClassFilter("all");
+    setSectionFilter("all");
+  }, [schoolFilter]);
+
+  // Reset section when class changes
+  useEffect(() => {
+    setSectionFilter("all");
+  }, [classFilter]);
+
+  // Derived dropdown options
+  const uniqueClasses = useMemo(
+    () =>
+      [...new Set(classSections.map((s) => s.classCode))].sort((a, b) => {
+        const numA = parseInt((classNameMap[a] || a).replace(/\D/g, "")) || 0;
+        const numB = parseInt((classNameMap[b] || b).replace(/\D/g, "")) || 0;
+        return numA - numB;
+      }),
+    [classSections, classNameMap]
+  );
+
+  const sectionsForClass = useMemo(
+    () =>
+      classFilter === "all"
+        ? []
+        : [...new Set(
+            classSections
+              .filter((s) => s.classCode === classFilter)
+              .map((s) => s.sectionCode)
+          )].sort(),
+    [classSections, classFilter]
+  );
+
+  const sectionNameMap = useMemo(
+    () =>
+      classSections.reduce<Record<string, string>>(
+        (acc, { classCode, sectionCode, sectionName }) => {
+          acc[`${classCode}__${sectionCode}`] = sectionName;
+          return acc;
+        },
+        {}
+      ),
+    [classSections]
+  );
 
   // Paginated registrations filtered by academic year
   const {
@@ -41,13 +150,16 @@ export default function StudentsPage() {
     setPageSize,
   } = usePaginatedCollection<DocRecord>("registrations", "Student_Number", 50, selectedYear);
 
-  // Full registrations only when searching or filtering by status
-  const needFullFetch = searchMode || statusFilter !== "all" || schoolFilter !== "all";
+  // Full registrations only when searching or filtering
+  const needFullFetch = searchMode || statusFilter !== "all" || schoolFilter !== "all" || classFilter !== "all" || sectionFilter !== "all";
   const { data: allRegs, loading: fullLoading } =
     useFilteredCollection<DocRecord>("registrations", needFullFetch ? selectedYear : null);
 
-  // Students collection (has names, gender, DOB, nationality)
-  const { data: students, loading: studentsLoading } = useCollection<DocRecord>("students", 10000);
+  // Students collection (has names, gender, DOB, nationality) — only load when needed
+  const { data: students, loading: studentsLoading } = useCollection<DocRecord>(
+    needFullFetch ? "students" : "",
+    needFullFetch ? 10000 : 0
+  );
 
   // Nationalities lookup (code → country name)
   const { data: nationalities } = useCollection<DocRecord>("nationalities", 500);
@@ -78,18 +190,25 @@ export default function StudentsPage() {
     return { ...reg, _student: stu ?? null } as DocRecord;
   };
 
-  // Apply status filter + school filter
-  const applyStatusFilter = (rows: DocRecord[]): DocRecord[] => {
+  // Apply school, class, section, status filters
+  const applyFilters = (rows: DocRecord[]): DocRecord[] => {
     let result = rows;
-    // School filter — registrations have Major_Code
     if (schoolFilter !== "all") {
       result = result.filter((s) => String(s.Major_Code || "") === schoolFilter);
     }
-    if (statusFilter === "all") return result;
-    return result.filter((s) => {
-      const terminated = !!s.Termination_Date;
-      return statusFilter === "withdrawn" ? terminated : !terminated;
-    });
+    if (classFilter !== "all") {
+      result = result.filter((s) => String(s.Class_Code || "") === classFilter);
+    }
+    if (sectionFilter !== "all") {
+      result = result.filter((s) => String(s.Section_Code || "") === sectionFilter);
+    }
+    if (statusFilter !== "all") {
+      result = result.filter((s) => {
+        const terminated = !!s.Termination_Date;
+        return statusFilter === "withdrawn" ? terminated : !terminated;
+      });
+    }
+    return result;
   };
 
   const handleSearchChange = (value: string) => {
@@ -99,19 +218,27 @@ export default function StudentsPage() {
 
   const filtered = useMemo(() => {
     const enriched = allRegs.map(enrich);
-    const statusFiltered = applyStatusFilter(enriched);
-    if (!search.trim()) return statusFiltered;
-    const q = search.toLowerCase();
-    return statusFiltered.filter((s) => {
-      const stu = s._student as DocRecord | null;
-      const name = String(stu?.E_Full_Name || stu?.E_Child_Name || "").toLowerCase();
-      const num = String(s.Student_Number || "").toLowerCase();
-      const natCode = String(stu?.Nationality_Code_Primary || "");
-      const natName = (nationalityMap.get(natCode) || "").toLowerCase();
-      return name.includes(q) || num.includes(q) || natName.includes(q);
+    const applied = applyFilters(enriched);
+    let result = applied;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((s) => {
+        const stu = s._student as DocRecord | null;
+        const name = String(stu?.E_Full_Name || stu?.E_Child_Name || "").toLowerCase();
+        const num = String(s.Student_Number || "").toLowerCase();
+        const natCode = String(stu?.Nationality_Code_Primary || "");
+        const natName = (nationalityMap.get(natCode) || "").toLowerCase();
+        return name.includes(q) || num.includes(q) || natName.includes(q);
+      });
+    }
+    result.sort((a, b) => {
+      const nameA = String((a._student as DocRecord | null)?.E_Full_Name || (a._student as DocRecord | null)?.E_Child_Name || "");
+      const nameB = String((b._student as DocRecord | null)?.E_Full_Name || (b._student as DocRecord | null)?.E_Child_Name || "");
+      return nameA.localeCompare(nameB);
     });
+    return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRegs, search, studentMap, statusFilter, nationalityMap, schoolFilter]);
+  }, [allRegs, search, studentMap, statusFilter, nationalityMap, schoolFilter, classFilter, sectionFilter]);
 
   const isFiltering = needFullFetch || schoolFilter !== "all";
   const displayData = isFiltering ? filtered : pagedRegs.map(enrich);
@@ -141,13 +268,42 @@ export default function StudentsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Students</h1>
-        <p className="text-muted-foreground">
-          Browse and search student records — {selectedLabel}
-          {schoolFilter !== "all" && ` — ${schoolLabel}`}
-          {displayCount > 0 && ` (${displayCount.toLocaleString()} total)`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Students</h1>
+          <p className="text-muted-foreground">
+            Browse and search student records — {selectedLabel}
+            {schoolFilter !== "all" && ` — ${schoolLabel}`}
+            {displayCount > 0 && ` (${displayCount.toLocaleString()} total)`}
+          </p>
+        </div>
+        {displayData.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const { exportToCSV } = require("@/lib/export-csv");
+              exportToCSV(
+                `students-${selectedYear}`,
+                ["Student #", "Name", "Gender", "Birth Date", "Nationality", "Status"],
+                displayData.map((s) => {
+                  const stu = s._student as DocRecord | null;
+                  return [
+                    String(s.Student_Number || ""),
+                    String(stu?.E_Full_Name || stu?.E_Child_Name || "-"),
+                    stu?.Gender === true ? "Male" : stu?.Gender === false ? "Female" : "-",
+                    stu?.Child_Birth_Date ? String(stu.Child_Birth_Date).split("T")[0] : "-",
+                    stu?.Nationality_Code_Primary ? nationalityMap.get(String(stu.Nationality_Code_Primary)) || String(stu.Nationality_Code_Primary) : "-",
+                    s.Termination_Date ? "Withdrawn" : "Active",
+                  ];
+                }),
+              );
+            }}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        )}
       </div>
 
       {/* Search + Status Filter */}
@@ -174,10 +330,42 @@ export default function StudentsPage() {
             onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
             className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="all">All Students</option>
-            <option value="active">Active Only</option>
-            <option value="withdrawn">Withdrawn Only</option>
+            <option value="all">{t("allStudents")}</option>
+            <option value="active">{t("activeOnly")}</option>
+            <option value="withdrawn">{t("withdrawnOnly")}</option>
           </select>
+
+          {/* Class filter — visible when a school is selected */}
+          {schoolFilter !== "all" && uniqueClasses.length > 0 && (
+            <select
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="all">{t("allClasses")}</option>
+              {uniqueClasses.map((cc) => (
+                <option key={cc} value={cc}>
+                  {classNameMap[cc] || `${t("class")} ${cc}`}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Section filter — visible when a class is selected */}
+          {classFilter !== "all" && sectionsForClass.length > 0 && (
+            <select
+              value={sectionFilter}
+              onChange={(e) => setSectionFilter(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="all">{t("allSections")}</option>
+              {sectionsForClass.map((sc) => (
+                <option key={sc} value={sc}>
+                  {sectionNameMap[`${classFilter}__${sc}`] || sc}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

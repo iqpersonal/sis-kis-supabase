@@ -38,5 +38,23 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# ── Pipeline / build output logs ──
+pipeline_*.txt
+build_output*.txt
+summaries_output*.txt
+gen_output*.log
+gen_transcript*.log
+mirror_log.txt
+deploy_log*.txt
+scripts/*.log
+
+# ── Firebase cache ──
+.firebase/
+
+# ── Progress / cache files ──
+scripts/.mirror_progress.json
+scripts/.remaining_progress.json
+scripts/.upload_hashes.json
+
 # ── Vercel ──
 .vercel

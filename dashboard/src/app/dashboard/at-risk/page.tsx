@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { useAuth } from "@/context/auth-context";
 import { StudentDetailDialog } from "@/components/student-detail-dialog";
 import {
   Card,
@@ -20,7 +21,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Users, Percent, CalendarOff } from "lucide-react";
+import { AlertTriangle, Users, Percent, CalendarOff, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportToCSV } from "@/lib/export-csv";
 import {
   BarChart,
   Bar,
@@ -38,6 +41,7 @@ import {
 export default function AtRiskPage() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
+  const { can } = useAuth();
   const { summary, loading: loadSummary } = useSummary(selectedYear);
 
   const loading = yearLoading || loadSummary;
@@ -73,7 +77,7 @@ export default function AtRiskPage() {
       title: "At-Risk Students",
       value: ar.total_at_risk.toLocaleString(),
       icon: AlertTriangle,
-      desc: "Students with avg < 70",
+      desc: "Students with avg < 60",
     },
     {
       title: "At-Risk Rate",
@@ -114,14 +118,32 @@ export default function AtRiskPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          At-Risk Students
-        </h1>
-        <p className="text-muted-foreground">
-          Students with avg &lt; 70, cross-referenced with attendance — {selectedLabel}
-          {schoolFilter !== "all" && ` — ${schoolLabel}`}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            At-Risk Students
+          </h1>
+          <p className="text-muted-foreground">
+            Students with avg &lt; 70, cross-referenced with attendance — {selectedLabel}
+            {schoolFilter !== "all" && ` — ${schoolLabel}`}
+          </p>
+        </div>
+        {ar.at_risk_students.length > 0 && can("bulk_export.view") && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportToCSV(
+                `at-risk-${selectedYear}`,
+                ["#", "Student Name", "Student Number", "Class", "Average", "Absence Days", "Dual Risk"],
+                ar.at_risk_students.map((s, i) => [i + 1, s.studentName, s.studentNumber, s.className, s.avg, s.absenceDays, s.absenceDays >= 5 ? "Yes" : "No"]),
+              )
+            }
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        )}
       </div>
 
       {/* KPI Cards */}

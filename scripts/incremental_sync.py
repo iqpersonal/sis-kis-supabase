@@ -54,15 +54,20 @@ YEAR_TABLES = {
     "Student_Exam_Results":{"fs": "student_exam_results", "skip": set()},
     "Student_Tardy":       {"fs": "student_tardy",        "skip": {"DDS"}},
     "Section":             {"fs": "sections",             "skip": {"DDS"}},
+    "Class_Subjects":      {"fs": "class_subjects",       "skip": set()},
+    "Sponsor":             {"fs": "sponsors",             "skip": set()},
+    "Grades":              {"fs": "grades",               "skip": set()},
+    "Student_Previous_School": {"fs": "student_previous_schools", "skip": {"DDS"}},
+    "Charge_Type":         {"fs": "charge_types",         "skip": set()},
 }
 
 NO_YEAR_TABLES = {
     "Academic_Year":  {"fs": "academic_years",  "skip": set()},
-    "Charge_Type":    {"fs": "charge_types",    "skip": set()},
     "Nationality":    {"fs": "nationalities",   "skip": set()},
-    "Sponsor":        {"fs": "sponsors",        "skip": set()},
     "Class":          {"fs": "classes",         "skip": set()},
     "Subject":        {"fs": "subjects",        "skip": set()},
+    "Family":         {"fs": "families_raw",    "skip": {"DDS"}},
+    "Family_Children":{"fs": "family_children",  "skip": {"DDS"}},
 }
 
 # Students use a special join — handled separately
@@ -70,6 +75,14 @@ STUDENTS_FS = "students"
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
+
+def emit_progress(current, total, message, phase="sync", table=""):
+    """Emit a progress event line to stderr for the API to stream."""
+    pct = round(current / total * 100) if total else 0
+    obj = {"type": "progress", "current": current, "total": total, "pct": pct,
+           "phase": phase, "table": table, "message": message}
+    print(f"PROGRESS:{json.dumps(obj)}", file=sys.stderr, flush=True)
+
 
 def json_safe(val):
     if val is None:
@@ -258,9 +271,15 @@ def main():
     )
     cursor = conn.cursor()
 
+    # Total tables for progress tracking
+    TOTAL_STEPS = len(YEAR_TABLES) + len(NO_YEAR_TABLES) + 1  # +1 for students
+    step = 0
+
     # ── Restore .bak if provided ──
     if args.bak:
+        emit_progress(0, TOTAL_STEPS, "Restoring .bak file...", phase="restore")
         restore_bak(cursor, os.path.abspath(args.bak))
+        emit_progress(0, TOTAL_STEPS, "Restore complete", phase="restore")
 
     cursor.execute(f"USE [{TEMP_DB}]")
 
@@ -281,10 +300,14 @@ def main():
         fs_col = cfg["fs"]
         skip = cfg["skip"]
 
+        step += 1
+        emit_progress(step, TOTAL_STEPS, f"Checking {fs_col}...", table=fs_col)
+
         try:
             sql_counts = get_sql_year_counts(cursor, sql_table)
         except Exception as e:
             results.append({"collection": fs_col, "action": "error", "error": str(e)})
+            emit_progress(step, TOTAL_STEPS, f"{fs_col}: error", table=fs_col)
             continue
 
         fs_counts = get_fs_year_counts(db_fs, fs_col)
@@ -303,6 +326,7 @@ def main():
             fs_total = sum(fs_counts.values())
             results.append({"collection": fs_col, "action": "skip", "sql": sql_total, "firestore": fs_total, "synced": 0})
             print(f"  {fs_col}: ✓ all years match ({sql_total:,})", file=sys.stderr)
+            emit_progress(step, TOTAL_STEPS, f"{fs_col}: unchanged ✓", table=fs_col)
             continue
 
         synced_for_table = 0
@@ -340,6 +364,7 @@ def main():
             "synced": synced_for_table,
         })
         total_synced += synced_for_table
+        emit_progress(step, TOTAL_STEPS, f"{fs_col}: synced {synced_for_table:,} docs", table=fs_col)
 
     # ══════════════════════════════════════════════════════════════
     # 2) Tables WITHOUT Academic_Year → full re-upload if different
@@ -348,6 +373,8 @@ def main():
     for sql_table, cfg in NO_YEAR_TABLES.items():
         fs_col = cfg["fs"]
         skip = cfg["skip"]
+        step += 1
+        emit_progress(step, TOTAL_STEPS, f"Checking {fs_col}...", table=fs_col)
 
         cursor.execute(f"SELECT COUNT(*) FROM [{sql_table}]")
         sql_count = cursor.fetchone()[0]
@@ -356,9 +383,11 @@ def main():
         if sql_count == fs_count:
             results.append({"collection": fs_col, "action": "skip", "sql": sql_count, "firestore": fs_count, "synced": 0})
             print(f"  {fs_col}: ✓ match ({sql_count:,})", file=sys.stderr)
+            emit_progress(step, TOTAL_STEPS, f"{fs_col}: unchanged ✓", table=fs_col)
             continue
 
         print(f"  {fs_col}: SQL={sql_count:,} FS={fs_count:,} → re-uploading", file=sys.stderr)
+        emit_progress(step, TOTAL_STEPS, f"Uploading {fs_col} ({sql_count:,} docs)...", table=fs_col)
         deleted = delete_collection_docs(db_fs, fs_col)
         uploaded = upload_rows(cursor, db_fs, f"SELECT * FROM [{sql_table}]", fs_col, skip)
         results.append({
@@ -369,14 +398,19 @@ def main():
             "synced": uploaded,
         })
         total_synced += uploaded
+        emit_progress(step, TOTAL_STEPS, f"{fs_col}: synced {uploaded:,} docs", table=fs_col)
 
     # ══════════════════════════════════════════════════════════════
     # 3) Students (special join)
     # ══════════════════════════════════════════════════════════════
     print("\nPhase 3: Students (enrichment join)", file=sys.stderr)
+    step += 1
+    emit_progress(step, TOTAL_STEPS, "Syncing students...", table="students")
     student_result = sync_students(cursor, db_fs)
     results.append(student_result)
     total_synced += student_result.get("synced", 0)
+    action = student_result.get("action", "")
+    emit_progress(step, TOTAL_STEPS, f"students: {action} ({student_result.get('synced', 0):,} docs)", table="students")
 
     # ── Summary ──
     cursor.close()

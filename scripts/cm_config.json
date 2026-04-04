@@ -1,0 +1,1 @@
+{"UpdateWindowDay":["Mon"],"UpdateWindowEnabled":true,"UpdateWindowEndPeriod":["AM"],"UpdateWindowStartPeriod":["AM"],"id":{"enable_verbose_logs":true},"pm":{"AllowPostInstallReboots":true,"CheckinInterval":28800000,"loglevel":3},"uc":{"loglevel":3}}

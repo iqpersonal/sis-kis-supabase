@@ -28,6 +28,9 @@ try:
 except ImportError:
     sys.exit("firebase-admin required: pip install firebase-admin")
 
+from db_config import connect_sql
+
+# Legacy fallback (only used if connect_sql fails)
 SERVER = r"localhost\SQLEXPRESS"
 TEMP_DB = "_bak_import_temp"
 KEY_PATH = os.path.join(os.path.dirname(__file__), "serviceAccountKey.json")
@@ -60,19 +63,24 @@ def json_safe(val):
     return val
 
 
-def _build_student_detail(sn, student_detail_map, student_grades_map):
-    """Build a detail sub-dict for a student to embed in summary lists."""
+def _build_student_detail(sn, student_detail_map, student_grades_map, **extra):
+    """Build a detail sub-dict for a student to embed in summary lists.
+    
+    Extra context fields can be passed via **extra and will be merged in.
+    e.g. failingSubjects=[], absenceByMonth=[], balanceByTerm=[], examTrend=[], ...
+    """
     info = student_detail_map.get(sn, {})
     grades = student_grades_map.get(sn, {})
-    # Only include top-level detail fields (kept small to stay within Firestore 1MB doc limit)
     subjects = [{"subject": s, "grade": g} for s, g in sorted(grades.items())]
-    return {
+    detail = {
         "gender": info.get("gender", ""),
         "dob": info.get("dob", ""),
         "nationality": info.get("nationality", ""),
         "section": info.get("section", ""),
-        "subjects": subjects[:25],  # cap at 25 subjects
+        "subjects": subjects[:25],
     }
+    detail.update(extra)
+    return detail
 
 
 def parse_term(desc: str) -> int:
@@ -183,7 +191,7 @@ def empty_school_data():
 
 
 def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
-                           nationality_map, class_name_map):
+                           nationality_map, class_name_map, db_fs=None):
     """Build the full summary document for one academic year."""
 
     summary = {
@@ -262,7 +270,8 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                fc.Nationality_Code_Primary,
                ISNULL(n.E_Nationality_Name, '') as nationality_name,
                r.Section_Code,
-               ISNULL(sec.E_Section_Name, '') as section_name
+               ISNULL(sec.E_Section_Name, '') as section_name,
+               s.Family_Number
         FROM Registration r
         JOIN Student s ON r.Student_Number = s.Student_Number
         JOIN Family_Children fc
@@ -275,6 +284,9 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
     """, year_val)
     student_name_map = {}   # student_number → full name
     student_detail_map = {} # student_number → {gender, dob, nationality, section}
+    student_family_map = {} # student_number → family_number
+    student_section_map = {} # student_number → section_code
+    family_name_map = {}    # family_number → family_name (last name)
     for r in cursor.fetchall():
         sn = str(r.Student_Number)
         first = str(r.first_name or "").strip()
@@ -287,6 +299,11 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
             "nationality": str(r.nationality_name or "").strip(),
             "section": str(r.section_name or "").strip(),
         }
+        fam_num = str(r.Family_Number or "")
+        student_family_map[sn] = fam_num
+        student_section_map[sn] = str(r.Section_Code or "")
+        if fam_num and last:
+            family_name_map[fam_num] = last
 
     # ── Subject grades per student (for detail view) ──
     # Get latest exam grades for all students in this year
@@ -348,6 +365,16 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         WHERE Academic_Year = ?
     """, year_val)
     charges = cursor.fetchall()
+
+    # Build per-student charge-by-term breakdown for detail dialogs
+    stu_charge_by_term = defaultdict(lambda: defaultdict(lambda: {"charged": 0.0, "paid": 0.0, "balance": 0.0}))
+    for ch in charges:
+        sn = str(ch.Student_Number)
+        term = charge_type_term_map.get(str(ch.Charge_Type_Code or ""), 0)
+        label = {1: "Installment 1", 2: "Installment 2", 3: "Installment 3", 0: "Other"}[term]
+        stu_charge_by_term[sn][label]["charged"] += float(ch.charges)
+        stu_charge_by_term[sn][label]["paid"] += float(ch.paid)
+        stu_charge_by_term[sn][label]["balance"] += float(ch.balance)
 
     for filter_key, student_set in [("all", all_student_numbers),
                                      ("0021-01", major_students["0021-01"]),
@@ -466,11 +493,31 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
 
     # ── Absences ──
     cursor.execute("""
-        SELECT Student_Number, Absence_Date, ISNULL(No_of_Days, 1) as days
+        SELECT Student_Number, Absence_Date, ISNULL(No_of_Days, 1) as days,
+               Absence_Reason_Code
         FROM Student_Absence
         WHERE Academic_Year = ?
     """, year_val)
     absences = cursor.fetchall()
+
+    # Build per-student absence context for detail dialogs
+    stu_absence_monthly = defaultdict(lambda: defaultdict(int))   # sn → {month_label: days}
+    stu_absence_reasons = defaultdict(lambda: defaultdict(int))   # sn → {reason: count}
+    absence_reason_map = {}
+    cursor.execute("SELECT Absence_Reason_Code, E_Absence_Reason_Desc FROM Absence_Reason")
+    for r in cursor.fetchall():
+        name = str(r.E_Absence_Reason_Desc or "").strip()
+        absence_reason_map[str(r.Absence_Reason_Code)] = name if name else "Unknown"
+    for a in absences:
+        sn = str(a.Student_Number)
+        days = int(a.days)
+        m = extract_month(a.Absence_Date)
+        if m is not None:
+            stu_absence_monthly[sn][month_label(m)] += days
+        rc = str(a.Absence_Reason_Code or "").strip()
+        reason_name = absence_reason_map.get(rc, rc or "Unknown")
+        if reason_name:
+            stu_absence_reasons[sn][reason_name] += days
 
     for filter_key, student_set in [("all", all_student_numbers),
                                      ("0021-01", major_students["0021-01"]),
@@ -574,7 +621,14 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
 
         # Top 10 absentees (sorted by class, then days desc)
         sorted_abs = sorted(stu_abs_days.items(), key=lambda x: (class_name_map.get(student_class.get(x[0], ""), ""), -x[1]))[:10]
-        top_absentees = [{"studentNumber": sn, "studentName": student_name_map.get(sn, sn), "days": d, "className": class_name_map.get(student_class.get(sn, ""), ""), "detail": _build_student_detail(sn, student_detail_map, student_grades_map)} for sn, d in sorted_abs]
+        top_absentees = [{
+            "studentNumber": sn, "studentName": student_name_map.get(sn, sn),
+            "days": d, "className": class_name_map.get(student_class.get(sn, ""), ""),
+            "detail": _build_student_detail(sn, student_detail_map, student_grades_map,
+                absenceByMonth=[{"month": m, "days": dy} for m, dy in stu_absence_monthly.get(sn, {}).items()],
+                absenceReasons=[{"reason": r, "days": dy} for r, dy in stu_absence_reasons.get(sn, {}).items()],
+            ),
+        } for sn, d in sorted_abs]
 
         # Absence by class
         abs_by_class = []
@@ -652,6 +706,50 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         zero_paid = sum(1 for s in stu_charges.values() if s["paid"] <= 0 and s["charged"] > 0)
         collection_rate = (total_paid / total_charged * 100) if total_charged > 0 else 0
 
+        # Build student lists for fully-paid and zero-paid
+        # These will be stored in separate Firestore docs to avoid 1MB limit
+        fully_paid_students = []
+        zero_paid_students = []
+        for sn, d in stu_charges.items():
+            if d["balance"] <= 0:
+                fully_paid_students.append({
+                    "studentNumber": sn,
+                    "studentName": student_name_map.get(sn, sn),
+                    "className": class_name_map.get(student_class.get(sn, ""), ""),
+                    "charged": round(d["charged"], 2),
+                    "paid": round(d["paid"], 2),
+                    "balance": round(d["balance"], 2),
+                    "majorCode": student_major.get(sn, ""),
+                    "sectionCode": student_section_map.get(sn, ""),
+                    "sectionName": student_detail_map.get(sn, {}).get("section", ""),
+                    "familyNumber": student_family_map.get(sn, ""),
+                    "familyName": family_name_map.get(student_family_map.get(sn, ""), ""),
+                })
+            if d["paid"] <= 0 and d["charged"] > 0:
+                zero_paid_students.append({
+                    "studentNumber": sn,
+                    "studentName": student_name_map.get(sn, sn),
+                    "className": class_name_map.get(student_class.get(sn, ""), ""),
+                    "charged": round(d["charged"], 2),
+                    "paid": round(d["paid"], 2),
+                    "balance": round(d["balance"], 2),
+                    "majorCode": student_major.get(sn, ""),
+                    "sectionCode": student_section_map.get(sn, ""),
+                    "sectionName": student_detail_map.get(sn, {}).get("section", ""),
+                    "familyNumber": student_family_map.get(sn, ""),
+                    "familyName": family_name_map.get(student_family_map.get(sn, ""), ""),
+                })
+        fully_paid_students.sort(key=lambda x: (x["className"], x["studentName"]))
+        zero_paid_students.sort(key=lambda x: (x["className"], x["studentName"]))
+
+        # Store student lists in a separate Firestore document
+        if db_fs:
+            delinquency_students_ref = db_fs.collection("delinquency_students").document(f"{year}_{filter_key}")
+            delinquency_students_ref.set({
+                "fully_paid_students": fully_paid_students,
+                "zero_paid_students": zero_paid_students,
+            })
+
         # Balance by installment
         labels = {1: "Installment 1", 2: "Installment 2", 3: "Installment 3", 0: "Other"}
         balance_by_inst = []
@@ -689,7 +787,9 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                 "paid": round(d["paid"], 2),
                 "balance": round(d["balance"], 2),
                 "className": class_name_map.get(student_class.get(sn, ""), ""),
-                "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
+                "detail": _build_student_detail(sn, student_detail_map, student_grades_map,
+                    balanceByTerm=[{"term": t, **v} for t, v in stu_charge_by_term.get(sn, {}).items()],
+                ),
             })
 
         summary[filter_key]["delinquency"] = {
@@ -840,6 +940,20 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
     """, year_val)
     term_rows = cursor.fetchall()
 
+    # Build per-student exam trend: sn → [{"exam": name, "avg": float}]
+    stu_exam_trend = defaultdict(list)
+    _seen_trend = defaultdict(set)
+    for r in term_rows:
+        sn = str(r.Student_Number)
+        ec = str(r.Exam_Code)
+        if ec not in _seen_trend[sn]:
+            _seen_trend[sn].add(ec)
+            avg = float(r.Final_Average_Grade or 0)
+            stu_exam_trend[sn].append({
+                "exam": str(r.E_Exam_Desc or ec).strip(),
+                "avg": round(avg, 1),
+            })
+
     for filter_key, student_set in [("all", all_student_numbers),
                                      ("0021-01", major_students["0021-01"]),
                                      ("0021-02", major_students["0021-02"])]:
@@ -965,6 +1079,17 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
     else:
         honor_rows = []
 
+    # Build class average map from honor exam results (for comparison in detail dialogs)
+    _class_avg_sum = defaultdict(float)
+    _class_avg_cnt = defaultdict(int)
+    for r in honor_rows:
+        sn = str(r.Student_Number)
+        cc = student_class.get(sn, "")
+        if cc:
+            _class_avg_sum[cc] += float(r.Final_Average_Grade or 0)
+            _class_avg_cnt[cc] += 1
+    class_avg_map = {cc: round(_class_avg_sum[cc] / _class_avg_cnt[cc], 1) for cc in _class_avg_cnt if _class_avg_cnt[cc] > 0}
+
     for filter_key, student_set in [("all", all_student_numbers),
                                      ("0021-01", major_students["0021-01"]),
                                      ("0021-02", major_students["0021-02"])]:
@@ -991,7 +1116,10 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                     "classRank": int(r.Class_Rank or 0),
                     "secRank": int(r.Section_Rank or 0),
                     "className": class_name_map.get(cc, cc),
-                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
+                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map,
+                        examTrend=stu_exam_trend.get(sn, []),
+                        classAvg=class_avg_map.get(cc, 0),
+                    ),
                 })
 
         total_honor = len(honor_students)
@@ -1021,7 +1149,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         }
 
     # ── At-Risk Students ──
-    # Students with avg < 70 on the latest semester exam, cross-referenced with absences
+    # Students with avg < 60 on the latest semester exam, cross-referenced with absences
     at_risk_exam = honor_exam  # use same exam
 
     for filter_key, student_set in [("all", all_student_numbers),
@@ -1049,7 +1177,7 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
             class_total_cnt[cc] += 1
             avg = float(r.Final_Average_Grade or 0)
 
-            if avg < 70:
+            if avg < 60:
                 class_risk_cnt[cc] += 1
                 at_risk_students.append({
                     "studentNumber": sn,
@@ -1057,7 +1185,12 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
                     "avg": round(avg, 1),
                     "absenceDays": stu_abs.get(sn, 0),
                     "className": class_name_map.get(cc, cc),
-                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map),
+                    "detail": _build_student_detail(sn, student_detail_map, student_grades_map,
+                        failingSubjects=[{"subject": s, "grade": round(g, 1)} for s, g in student_grades_map.get(sn, {}).items() if g < 60],
+                        examTrend=stu_exam_trend.get(sn, []),
+                        classAvg=class_avg_map.get(cc, 0),
+                        absenceByMonth=[{"month": m, "days": dy} for m, dy in stu_absence_monthly.get(sn, {}).items()],
+                    ),
                 })
 
         total_risk = len(at_risk_students)
@@ -1125,16 +1258,361 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
     return summary
 
 
+# ── Quiz / Assessment Grades Summary ────────────────────────────────
+def build_quiz_summary_for_year(cursor, year, class_name_map):
+    """Build a Firestore doc with tbl_Quiz_Grades aggregations split by school.
+
+    Structure:  quiz_summaries/{year}
+    {
+      academic_year, updated_at,
+      "all":      { exams, classes, sections, data },
+      "0021-01":  { exams, classes, sections, data },   # Boys' School
+      "0021-02":  { exams, classes, sections, data },   # Girls' School
+    }
+    """
+    print("  Building quiz / assessment grades summary...")
+
+    # Exam definitions
+    cursor.execute("SELECT Exam_Code, E_Exam_Desc FROM Exams ORDER BY Exam_Code")
+    exam_map = {}
+    for r in cursor.fetchall():
+        exam_map[str(r.Exam_Code)] = str(r.E_Exam_Desc or r.Exam_Code)
+
+    # Subject name map (English)
+    cursor.execute("SELECT Subject_Code, E_Subject_Name FROM Subject")
+    subject_map = {}
+    for r in cursor.fetchall():
+        subject_map[str(r.Subject_Code)] = str(r.E_Subject_Name or r.Subject_Code)
+
+    # Section name map for this year — keyed by (major, class, sec) for school-specific names
+    cursor.execute("""
+        SELECT Major_Code, Class_Code, Section_Code, E_Section_Name
+        FROM Section
+        WHERE Academic_Year = ?
+    """, year)
+    section_name_map = {}  # (class, sec) → name  (last wins — used for "all" slice)
+    section_name_by_major = {}  # (major, class, sec) → name  (school-specific)
+    for r in cursor.fetchall():
+        major = str(r.Major_Code)
+        cc = str(r.Class_Code)
+        sc = str(r.Section_Code)
+        name = str(r.E_Section_Name or sc).strip()
+        section_name_map[(cc, sc)] = name
+        section_name_by_major[(major, cc, sc)] = name
+
+    # Fetch aggregated quiz grades — now including Major_Code
+    cursor.execute("""
+        SELECT Exam_Code, Major_Code, Class_Code, Section_Code, Subject_Code, Quiz_Code,
+               COUNT(*) as total,
+               SUM(CASE WHEN Grade IS NOT NULL THEN 1 ELSE 0 END) as graded,
+               CAST(AVG(Grade) AS DECIMAL(5,1)) as avg_grade,
+               CAST(MIN(Grade) AS DECIMAL(5,1)) as min_grade,
+               CAST(MAX(Grade) AS DECIMAL(5,1)) as max_grade,
+               COUNT(DISTINCT Student_Number) as students
+        FROM tbl_Quiz_Grades
+        WHERE Academic_Year = ?
+        GROUP BY Exam_Code, Major_Code, Class_Code, Section_Code, Subject_Code, Quiz_Code
+    """, year)
+    raw_rows = cursor.fetchall()
+    print(f"    Found {len(raw_rows):,} aggregation rows")
+
+    if not raw_rows:
+        return None  # no quiz data for this year
+
+    # Discover school codes (Major_Code values)
+    school_codes = set()
+    for r in raw_rows:
+        school_codes.add(str(r.Major_Code))
+
+    # We'll build a full slice for "all" and each school code
+    filter_keys = ["all"] + sorted(school_codes)
+
+    # Helper to create empty accumulators
+    def new_bucket():
+        return {"subjects": defaultdict(lambda: {"total": 0, "graded": 0, "sum": 0.0,
+                                                  "min": 999, "max": 0}),
+                "quizzes": defaultdict(lambda: {"total": 0, "graded": 0, "sum": 0.0}),
+                "total": 0, "graded": 0, "sum": 0.0}
+
+    # Accumulators per filter: [filter_key][exam][class][section] → bucket
+    acc = {}
+    exam_sets = {}
+    class_sets = {}
+    section_dicts = {}
+    for fk in filter_keys:
+        acc[fk] = defaultdict(lambda: defaultdict(lambda: defaultdict(new_bucket)))
+        exam_sets[fk] = set()
+        class_sets[fk] = set()
+        section_dicts[fk] = defaultdict(set)
+
+    for r in raw_rows:
+        ec = str(r.Exam_Code)
+        mc = str(r.Major_Code)
+        cc = str(r.Class_Code)
+        sc = str(r.Section_Code)
+        subj = str(r.Subject_Code)
+        qc = str(r.Quiz_Code)
+        total = int(r.total)
+        graded = int(r.graded)
+        avg = float(r.avg_grade) if r.avg_grade else 0
+        mn = float(r.min_grade) if r.min_grade else 0
+        mx = float(r.max_grade) if r.max_grade else 0
+
+        # Feed into both "all" and the specific school filter
+        for fk in ["all", mc]:
+            exam_sets[fk].add(ec)
+            class_sets[fk].add(cc)
+            section_dicts[fk][cc].add(sc)
+
+            bucket = acc[fk][ec][cc][sc]
+            bucket["total"] += total
+            bucket["graded"] += graded
+            bucket["sum"] += avg * graded if graded else 0
+
+            sub = bucket["subjects"][subj]
+            sub["total"] += total
+            sub["graded"] += graded
+            sub["sum"] += avg * graded if graded else 0
+            if mn and mn < sub["min"]:
+                sub["min"] = mn
+            if mx > sub["max"]:
+                sub["max"] = mx
+
+            quiz = bucket["quizzes"][qc]
+            quiz["total"] += total
+            quiz["graded"] += graded
+            quiz["sum"] += avg * graded if graded else 0
+
+    # ── Helper functions ──
+    def subject_list(subj_acc):
+        items = []
+        for code, s in sorted(subj_acc.items(), key=lambda x: (x[1]["sum"] / x[1]["graded"]) if x[1]["graded"] else 999):
+            items.append({
+                "code": code,
+                "name": subject_map.get(code, code),
+                "records": s["total"],
+                "graded": s["graded"],
+                "avg": round(s["sum"] / s["graded"], 1) if s["graded"] else 0,
+                "min": s["min"] if s["min"] < 999 else 0,
+                "max": s["max"],
+            })
+        return items
+
+    def quiz_list(quiz_acc):
+        items = []
+        for code, q in sorted(quiz_acc.items()):
+            items.append({
+                "code": code,
+                "records": q["total"],
+                "graded": q["graded"],
+                "avg": round(q["sum"] / q["graded"], 1) if q["graded"] else 0,
+            })
+        return items
+
+    # ── Build output for each filter key ──
+    result = {
+        "academic_year": str(year),
+        "updated_at": datetime.now(tz=None).isoformat(),
+    }
+
+    for fk in filter_keys:
+        major_filter = None if fk == "all" else fk
+        data = {}
+        for ec in sorted(exam_sets[fk]):
+            exam_data = {"overall": {"records": 0, "graded": 0, "avg": 0, "students": 0,
+                                      "bySubject": [], "byQuiz": []},
+                         "byClass": {}}
+            overall_subj = defaultdict(lambda: {"total": 0, "graded": 0, "sum": 0.0, "min": 999, "max": 0})
+            overall_quiz = defaultdict(lambda: {"total": 0, "graded": 0, "sum": 0.0})
+            overall_total = 0
+            overall_graded = 0
+            overall_sum = 0.0
+
+            for cc in sorted(acc[fk][ec].keys()):
+                class_total = 0
+                class_graded = 0
+                class_sum = 0.0
+                class_subj = defaultdict(lambda: {"total": 0, "graded": 0, "sum": 0.0, "min": 999, "max": 0})
+                by_section = {}
+
+                for sc in sorted(acc[fk][ec][cc].keys()):
+                    b = acc[fk][ec][cc][sc]
+                    sec_total = b["total"]
+                    sec_graded = b["graded"]
+                    sec_avg = round(b["sum"] / sec_graded, 1) if sec_graded else 0
+
+                    # Count unique students per section
+                    if major_filter:
+                        cursor.execute("""
+                            SELECT COUNT(DISTINCT Student_Number) as cnt
+                            FROM tbl_Quiz_Grades
+                            WHERE Academic_Year = ? AND Exam_Code = ? AND Class_Code = ?
+                                  AND Section_Code = ? AND Major_Code = ?
+                        """, year, ec, cc, sc, major_filter)
+                    else:
+                        cursor.execute("""
+                            SELECT COUNT(DISTINCT Student_Number) as cnt
+                            FROM tbl_Quiz_Grades
+                            WHERE Academic_Year = ? AND Exam_Code = ? AND Class_Code = ?
+                                  AND Section_Code = ?
+                        """, year, ec, cc, sc)
+                    sec_students = cursor.fetchone().cnt
+
+                    sec_subj_list = subject_list(b["subjects"])
+                    # Use school-specific section name when available
+                    sec_name = (section_name_by_major.get((major_filter, cc, sc), None)
+                                if major_filter else None) or section_name_map.get((cc, sc), sc)
+
+                    by_section[sc] = {
+                        "sectionName": sec_name,
+                        "records": sec_total,
+                        "graded": sec_graded,
+                        "avg": sec_avg,
+                        "students": sec_students,
+                        "bySubject": sec_subj_list,
+                    }
+
+                    class_total += sec_total
+                    class_graded += sec_graded
+                    class_sum += b["sum"]
+
+                    for subj, s in b["subjects"].items():
+                        cs = class_subj[subj]
+                        cs["total"] += s["total"]
+                        cs["graded"] += s["graded"]
+                        cs["sum"] += s["sum"]
+                        if s["min"] < cs["min"]:
+                            cs["min"] = s["min"]
+                        if s["max"] > cs["max"]:
+                            cs["max"] = s["max"]
+
+                    for qc, q in b["quizzes"].items():
+                        oq = overall_quiz[qc]
+                        oq["total"] += q["total"]
+                        oq["graded"] += q["graded"]
+                        oq["sum"] += q["sum"]
+
+                # Count unique students per class
+                if major_filter:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT Student_Number) as cnt
+                        FROM tbl_Quiz_Grades
+                        WHERE Academic_Year = ? AND Exam_Code = ? AND Class_Code = ? AND Major_Code = ?
+                    """, year, ec, cc, major_filter)
+                else:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT Student_Number) as cnt
+                        FROM tbl_Quiz_Grades
+                        WHERE Academic_Year = ? AND Exam_Code = ? AND Class_Code = ?
+                    """, year, ec, cc)
+                class_stu_count = cursor.fetchone().cnt
+
+                class_avg = round(class_sum / class_graded, 1) if class_graded else 0
+                exam_data["byClass"][cc] = {
+                    "className": class_name_map.get(cc, cc),
+                    "records": class_total,
+                    "graded": class_graded,
+                    "avg": class_avg,
+                    "students": class_stu_count,
+                    "bySubject": subject_list(class_subj),
+                    "bySection": by_section,
+                }
+
+                overall_total += class_total
+                overall_graded += class_graded
+                overall_sum += class_sum
+                for subj, s in class_subj.items():
+                    os = overall_subj[subj]
+                    os["total"] += s["total"]
+                    os["graded"] += s["graded"]
+                    os["sum"] += s["sum"]
+                    if s["min"] < os["min"]:
+                        os["min"] = s["min"]
+                    if s["max"] > os["max"]:
+                        os["max"] = s["max"]
+
+            # Build overall
+            exam_data["overall"]["records"] = overall_total
+            exam_data["overall"]["graded"] = overall_graded
+            exam_data["overall"]["avg"] = round(overall_sum / overall_graded, 1) if overall_graded else 0
+            if major_filter:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT Student_Number) as cnt
+                    FROM tbl_Quiz_Grades
+                    WHERE Academic_Year = ? AND Exam_Code = ? AND Major_Code = ?
+                """, year, ec, major_filter)
+            else:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT Student_Number) as cnt
+                    FROM tbl_Quiz_Grades
+                    WHERE Academic_Year = ? AND Exam_Code = ?
+                """, year, ec)
+            exam_data["overall"]["students"] = cursor.fetchone().cnt
+            exam_data["overall"]["bySubject"] = subject_list(overall_subj)
+            exam_data["overall"]["byQuiz"] = quiz_list(overall_quiz)
+
+            data[ec] = exam_data
+
+        # Build metadata lists for this filter
+        exams_list = []
+        for ec in sorted(exam_sets[fk]):
+            d = data[ec]["overall"]
+            exams_list.append({
+                "examCode": ec,
+                "examName": exam_map.get(ec, f"Exam {ec}"),
+                "records": d["records"],
+                "graded": d["graded"],
+                "avg": d["avg"],
+            })
+
+        classes_list = []
+        for cc in sorted(class_sets[fk]):
+            classes_list.append({
+                "classCode": cc,
+                "className": class_name_map.get(cc, cc),
+            })
+
+        sections_out = {}
+        for cc in sorted(section_dicts[fk].keys()):
+            secs = []
+            for sc in sorted(section_dicts[fk][cc]):
+                # Use school-specific name when fk is a school code
+                sec_name = (section_name_by_major.get((fk, cc, sc), None)
+                            if fk != "all" else None) or section_name_map.get((cc, sc), sc)
+                secs.append({
+                    "sectionCode": sc,
+                    "sectionName": sec_name,
+                })
+            sections_out[cc] = secs
+
+        result[fk] = {
+            "exams": exams_list,
+            "classes": classes_list,
+            "sections": sections_out,
+            "data": data,
+        }
+
+    all_exams = len(result.get("all", {}).get("exams", []))
+    all_classes = len(result.get("all", {}).get("classes", []))
+    print(f"    Quiz summary: {all_exams} exams, {all_classes} classes, {len(filter_keys)} school slices")
+    return result
+
+
 def main():
     target_year = sys.argv[1] if len(sys.argv) > 1 else None
 
     # ── Connect SQL Server ──
     print("Connecting to SQL Server...")
-    conn = pyodbc.connect(
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};"
-        f"DATABASE={TEMP_DB};Trusted_Connection=yes",
-        autocommit=True,
-    )
+    try:
+        conn = connect_sql()
+        print("  Connected via db_config (live SQL Server)")
+    except Exception:
+        print("  db_config failed, falling back to localhost\\SQLEXPRESS")
+        conn = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={SERVER};"
+            f"DATABASE={TEMP_DB};Trusted_Connection=yes",
+            autocommit=True,
+        )
     cursor = conn.cursor()
 
     # ── Init Firebase ──
@@ -1180,12 +1658,21 @@ def main():
 
         summary = build_summary_for_year(
             cursor, year, all_years,
-            charge_type_term_map, nationality_map, class_name_map
+            charge_type_term_map, nationality_map, class_name_map, db_fs
         )
 
         # Write to Firestore
         doc_ref = db_fs.collection("summaries").document(str(year))
         doc_ref.set(summary)
+
+        # ── Quiz / Assessment Grades Summary ──
+        quiz_summary = build_quiz_summary_for_year(cursor, year, class_name_map)
+        if quiz_summary:
+            qs_ref = db_fs.collection("quiz_summaries").document(str(year))
+            qs_ref.set(quiz_summary)
+            print(f"  ✓ Quiz Summaries written to Firestore: quiz_summaries/{year}")
+        else:
+            print(f"  ⚠ No quiz grade data for {year}")
 
         s = summary["all"]
         print(f"  ✓ Students: {s['total_students']:,}")

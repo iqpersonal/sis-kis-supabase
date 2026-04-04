@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import {
   collection,
   getDocs,
@@ -14,6 +15,11 @@ import {
   limit,
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
+import { useAuth } from "@/context/auth-context";
+
+/* ── Session-level cache for academic years ── */
+let ayCache: { years: string[]; defaultYear: string | null; ts: number } | null = null;
+const AY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 interface AcademicYearCtx {
   years: string[];               // e.g. ["22-23", "21-22", "20-21", ...]
@@ -52,8 +58,31 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
   const [years, setYears] = useState<string[]>([]);
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
+    // Skip Firestore reads on parent portal routes (no Firebase Auth there)
+    if (pathname?.startsWith("/parent")) {
+      setLoading(false);
+      return;
+    }
+
+    // Wait for auth to resolve; if not logged in, skip
+    if (authLoading) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    // Return cached data if still fresh
+    if (ayCache && Date.now() - ayCache.ts < AY_CACHE_TTL) {
+      setYears(ayCache.years);
+      setSelectedYear(ayCache.defaultYear);
+      setLoading(false);
+      return;
+    }
+
     (async () => {
       try {
         const db = getDb();
@@ -70,18 +99,18 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
 
           // Default to the year marked Current_Year, or newest
           const currentDoc = docs.find((d) => d.Current_Year === true);
-          if (currentDoc) {
-            setSelectedYear(String(currentDoc.Academic_Year));
-          } else {
-            setSelectedYear(unique[0] ?? null);
-          }
+          const defaultYear = currentDoc
+            ? String(currentDoc.Academic_Year)
+            : unique[0] ?? null;
+          setSelectedYear(defaultYear);
+          ayCache = { years: unique, defaultYear, ts: Date.now() };
           setLoading(false);
           return;
         }
 
-        // 2) Fallback: scan registrations for distinct Academic_Year values
+        // 2) Fallback: scan a smaller sample of registrations for distinct Academic_Year values
         const regSnap = await getDocs(
-          query(collection(db, "registrations"), limit(10000))
+          query(collection(db, "registrations"), limit(500))
         );
         const yearSet = new Set<string>();
         regSnap.docs.forEach((d) => {
@@ -91,13 +120,14 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
         const sorted = [...yearSet].sort().reverse(); // newest first
         setYears(sorted);
         setSelectedYear(sorted[0] ?? null);
+        ayCache = { years: sorted, defaultYear: sorted[0] ?? null, ts: Date.now() };
       } catch (err) {
         console.error("Failed to discover academic years:", err);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [user, authLoading, pathname]);
 
   const selectedLabel = selectedYear
     ? formatYearLabel(selectedYear)
