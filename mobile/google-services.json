@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "587113059865",
+    "project_id": "sis-kis",
+    "storage_bucket": "sis-kis.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:587113059865:android:257611efbb9e329b40bc88",
+        "android_client_info": {
+          "package_name": "com.kis.sis"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkxdSj5-21hYgJ7Txo86s609gGd86h54Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
