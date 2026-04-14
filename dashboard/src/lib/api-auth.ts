@@ -86,6 +86,7 @@ export async function verifyAdmin(req: NextRequest): Promise<AuthResult> {
     "finance",
     "accounts",
     "registrar",
+    "it_admin",
   ];
   if (!ADMIN_ROLES.includes(result.role)) {
     return {
@@ -118,10 +119,13 @@ export async function verifySuperAdmin(req: NextRequest): Promise<AuthResult> {
  * Verify the request has either a valid Firebase token (admin dashboard)
  * OR a valid portal session cookie (teacher/student/parent portals).
  * Returns ok:true if the caller is authenticated through either mechanism.
+ *
+ * NOTE: All portals now use the "__session" cookie (Firebase Hosting strips
+ * every other cookie). The expectedValue param identifies the portal type.
  */
 export async function verifyAuthOrPortalSession(
   req: NextRequest,
-  portalCookie: "__teacher_session" | "__student_session" | "__parent_session"
+  expectedValue: "teacher" | "student" | "parent"
 ): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
   // Try Firebase Auth first (admin dashboard callers)
   const token = extractToken(req);
@@ -132,9 +136,9 @@ export async function verifyAuthOrPortalSession(
     } catch { /* fall through to portal check */ }
   }
 
-  // Fall back to portal session cookie
-  const session = req.cookies.get(portalCookie)?.value;
-  if (session) {
+  // Fall back to portal session cookie (__session with portal-specific value)
+  const session = req.cookies.get("__session")?.value;
+  if (session === expectedValue) {
     return { ok: true };
   }
 

@@ -1,11 +1,11 @@
 import { Redirect } from "expo-router";
-import { useAuth } from "@/context/auth-context";
+import { useAuth, isStoreRole, isStaffOnlyRole } from "@/context/auth-context";
 import { useParent } from "@/context/parent-context";
 import { View, ActivityIndicator } from "react-native";
 import { colors } from "@/lib/theme";
 
 export default function Index() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, role, loading: authLoading } = useAuth();
   const { familyNumber, loading: parentLoading } = useParent();
 
   if (authLoading || parentLoading) {
@@ -18,6 +18,14 @@ export default function Index() {
 
   // If admin/teacher is signed in via Firebase Auth
   if (user) {
+    // Staff-only users get the staff portal
+    if (isStaffOnlyRole(role)) {
+      return <Redirect href="/(staff)/home" />;
+    }
+    // Store-only roles get the focused store experience
+    if (isStoreRole(role)) {
+      return <Redirect href="/(store)" />;
+    }
     return <Redirect href="/(tabs)" />;
   }
 

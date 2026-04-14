@@ -62,7 +62,7 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
   pdf.setFontSize(9);
   pdf.setTextColor(100, 100, 100);
   pdf.setFont("helvetica", "normal");
-  pdf.text("Knowledge International School", pageW / 2, y, { align: "center" });
+  pdf.text("Khaled International Schools", pageW / 2, y, { align: "center" });
   y += 4;
   pdf.text("Book Sales Receipt", pageW / 2, y, { align: "center" });
   y += 6;
@@ -147,8 +147,8 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
   pdf.line(margin, y, pageW - margin, y);
   y += 5;
 
-  const subtotal = typeof sale.subtotal === "number" ? sale.subtotal : (typeof sale.total_amount === "number" ? sale.total_amount / 1.15 : 0);
-  const vatAmount = typeof sale.vat_amount === "number" ? sale.vat_amount : Math.round(subtotal * 0.15 * 100) / 100;
+  const subtotal = typeof sale.subtotal === "number" ? sale.subtotal : 0;
+  const vatAmount = typeof sale.vat_amount === "number" ? sale.vat_amount : 0;
   const totalAmount = typeof sale.total_amount === "number" ? sale.total_amount : Math.round((subtotal + vatAmount) * 100) / 100;
   const paidAmount = typeof sale.paid_amount === "number" ? sale.paid_amount : totalAmount;
 

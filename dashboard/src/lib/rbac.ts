@@ -8,6 +8,7 @@
 
 export const ROLES = {
   super_admin: "Super Admin",
+  school_admin: "School Admin",
   it_manager: "IT Manager",
   academic_director: "Academic Director",
   head_of_section: "Head of Section",
@@ -19,6 +20,8 @@ export const ROLES = {
   teacher: "Teacher",
   viewer: "Viewer",
   bookshop: "Bookshop",
+  store_clerk: "Store Clerk",
+  it_admin: "IT Admin",
 } as const;
 
 export type Role = keyof typeof ROLES;
@@ -80,6 +83,17 @@ export const PERMISSIONS = [
   // Quizzes
   "quizzes.view",
   "quizzes.manage",
+  // Stores
+  "general_store.view",
+  "general_store.manage",
+  "general_store.request",
+  "it_store.view",
+  "it_store.manage",
+  "it_store.request",
+  "store_reports.view",
+  // Announcements & IT Tickets
+  "announcements.manage",
+  "tickets.manage",
   // Admin
   "admin.users",
   "admin.audit_log",
@@ -92,17 +106,23 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   super_admin: PERMISSIONS, // all permissions
 
-  // IT Manager gets all academic + staff + inventory
+  // School Admin: full operational access minus user management & audit log
+  school_admin: PERMISSIONS.filter(
+    (p) => p !== "admin.users" && p !== "admin.audit_log"
+  ),
+
+  // IT Manager: IT store, inventory, tickets — no students or academics
   it_manager: [
     "dashboard.view",
-    "students.view",
-    "students.profile",
     "staff.view",
     "inventory.view",
     "inventory.manage",
-    "notifications.view",
-    "analytics.view",
-    "bulk_export.view",
+    "it_store.view",
+    "it_store.manage",
+    "it_store.request",
+    "store_reports.view",
+    "announcements.manage",
+    "tickets.manage",
   ],
 
   // Academic Director: view-only, scoped to assigned major (school branch)
@@ -179,30 +199,27 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "bulk_export.view",
   ],
 
+  // Finance Officer: fees & delinquency only, can edit fees
   finance: [
     "dashboard.view",
-    "students.view",
-    "students.profile",
     "fees.view",
     "fees.edit",
     "delinquency.view",
     "notifications.view",
-    "analytics.view",
     "bulk_export.view",
   ],
 
+  // Accounts: fees & delinquency read-only, plus documents
   accounts: [
     "dashboard.view",
-    "students.view",
-    "students.profile",
     "fees.view",
     "delinquency.view",
     "documents.view",
     "notifications.view",
-    "analytics.view",
     "bulk_export.view",
   ],
 
+  // Registrar: student registration, documents, transfers — no academics/analytics
   registrar: [
     "dashboard.view",
     "students.view",
@@ -211,9 +228,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "documents.view",
     "transfers.view",
     "transfers.edit",
-    "notifications.view",
-    "analytics.view",
     "upload.view",
+    "notifications.view",
   ],
 
   teacher: [
@@ -256,10 +272,27 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
 
   bookshop: [
     "dashboard.view",
-    "students.view",
-    "students.profile",
     "book_sales.view",
     "book_sales.manage",
+  ],
+
+  store_clerk: [
+    "dashboard.view",
+    "general_store.view",
+    "general_store.manage",
+    "general_store.request",
+    "store_reports.view",
+  ],
+
+  it_admin: [
+    "dashboard.view",
+    "inventory.view",
+    "inventory.manage",
+    "it_store.view",
+    "it_store.manage",
+    "it_store.request",
+    "store_reports.view",
+    "tickets.manage",
   ],
 };
 
@@ -297,9 +330,14 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/dashboard/audit-log": "admin.audit_log",
   "/dashboard/staff": "staff.view",
   "/dashboard/it-inventory": "inventory.view",
+  "/dashboard/general-store": "general_store.view",
+  "/dashboard/it-store": "it_store.view",
+  "/dashboard/store-reports": "store_reports.view",
   "/dashboard/book-sales": "book_sales.view",
   "/dashboard/diplomas": "certificates.print",
   "/dashboard/quizzes": "quizzes.view",
+  "/dashboard/announcements": "announcements.manage",
+  "/dashboard/it-tickets": "tickets.manage",
 };
 
 /* ── Helper functions ────────────────────────────────────────────  */

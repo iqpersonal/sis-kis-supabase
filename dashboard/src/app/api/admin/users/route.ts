@@ -108,6 +108,8 @@ export async function POST(req: NextRequest) {
   if (email) {
     let userRecord;
     let wasCreated = false;
+    let emailSent = false;
+    let emailError: string | undefined;
 
     try {
       userRecord = await adminAuth.getUserByEmail(email);
@@ -120,21 +122,7 @@ export async function POST(req: NextRequest) {
           password: tempPassword,
           displayName: email.split("@")[0],
         });
-        // Generate a password reset link so the user can set their own password
-        const resetLink = await adminAuth.generatePasswordResetLink(email);
         wasCreated = true;
-
-        // Send welcome email with password-reset link
-        const tpl = teacherWelcomeEmail({
-          displayName: email.split("@")[0],
-          email,
-          role: role as string,
-          resetLink,
-        });
-        sendEmail({ to: email, subject: tpl.subject, html: tpl.html }).catch((e) =>
-          console.error("Welcome email failed:", e)
-        );
-
         logAudit({ actor: "super_admin", action: "user.create-auth", details: `Auto-created Firebase Auth for ${email}`, targetId: userRecord.uid, targetType: "user" });
       } catch (createErr) {
         return NextResponse.json(
@@ -142,6 +130,23 @@ export async function POST(req: NextRequest) {
           { status: 500 }
         );
       }
+    }
+
+    // Always generate a password-reset link and send a welcome/role email
+    try {
+      const resetLink = await adminAuth.generatePasswordResetLink(email);
+      const tpl = teacherWelcomeEmail({
+        displayName: userRecord.displayName || email.split("@")[0],
+        email,
+        role: ROLES[role as Role] || role,
+        resetLink,
+      });
+      const result = await sendEmail({ to: email, subject: tpl.subject, html: tpl.html });
+      emailSent = !!result.sent;
+      if (!result.sent) emailError = result.reason;
+    } catch (e) {
+      console.error("Welcome email failed:", e);
+      emailError = e instanceof Error ? e.message : "Unknown email error";
     }
 
     await adminDb
@@ -154,7 +159,7 @@ export async function POST(req: NextRequest) {
         createdAt: new Date().toISOString(),
       });
     logAudit({ actor: "super_admin", action: "user.create", details: `Added ${email} as ${role}${wasCreated ? " (account auto-created)" : ""}`, targetId: userRecord.uid, targetType: "user" });
-    return NextResponse.json({ ok: true, uid: userRecord.uid, created: wasCreated });
+    return NextResponse.json({ ok: true, uid: userRecord.uid, created: wasCreated, emailSent, emailError });
   }
 
   return NextResponse.json(

@@ -49,6 +49,12 @@ import {
   RotateCcw,
 } from "lucide-react";
 import type { ITAsset, AssetType, AssetStatus, AssetCondition } from "@/types/sis";
+import { useAuth } from "@/context/auth-context";
+
+const BRANCH_OPTIONS: Record<string, string> = {
+  "0021-01": "Boys' School (0021-01)",
+  "0021-02": "Girls' School (0021-02)",
+};
 
 /* ── type icon map ─────────────────────────────────────────────── */
 const TYPE_ICONS: Record<AssetType, React.ElementType> = {
@@ -101,6 +107,9 @@ interface Stats {
   by_type: Record<string, number>;
   by_branch: Record<string, number>;
   total_value: number;
+  total_depreciation: number;
+  total_book_value: number;
+  maintenance_due: number;
 }
 
 interface StaffMember {
@@ -113,6 +122,7 @@ interface StaffMember {
 
 /* ── Page ──────────────────────────────────────────────────────── */
 export default function ITInventoryPage() {
+  const { user } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [assets, setAssets] = useState<ITAsset[]>([]);
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -126,6 +136,7 @@ export default function ITInventoryPage() {
   const [showAssign, setShowAssign] = useState(false);
   const [showReturn, setShowReturn] = useState(false);
   const [showCsv, setShowCsv] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<ITAsset | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -142,6 +153,10 @@ export default function ITInventoryPage() {
     location: "",
     branch: "",
     notes: "",
+    useful_life_years: "",
+    salvage_value: "",
+    next_maintenance_date: "",
+    maintenance_interval_days: "",
   });
 
   // Assign form
@@ -151,6 +166,11 @@ export default function ITInventoryPage() {
   // Return form
   const [returnCondition, setReturnCondition] = useState<AssetCondition>("good");
   const [returnNotes, setReturnNotes] = useState("");
+
+  // Maintenance form
+  const [maintDate, setMaintDate] = useState("");
+  const [maintInterval, setMaintInterval] = useState("");
+  const [maintNotes, setMaintNotes] = useState("");
 
   // CSV
   const [csvText, setCsvText] = useState("");
@@ -210,6 +230,11 @@ export default function ITInventoryPage() {
           action: "create_asset",
           ...form,
           purchase_price: form.purchase_price ? Number(form.purchase_price) : null,
+          useful_life_years: form.useful_life_years ? Number(form.useful_life_years) : null,
+          salvage_value: form.salvage_value ? Number(form.salvage_value) : null,
+          maintenance_interval_days: form.maintenance_interval_days ? Number(form.maintenance_interval_days) : null,
+          next_maintenance_date: form.next_maintenance_date || null,
+          performed_by: user?.email || "unknown",
         }),
       });
       if (res.ok) {
@@ -226,6 +251,10 @@ export default function ITInventoryPage() {
           location: "",
           branch: "",
           notes: "",
+          useful_life_years: "",
+          salvage_value: "",
+          next_maintenance_date: "",
+          maintenance_interval_days: "",
         });
         fetchData();
       }
@@ -247,6 +276,7 @@ export default function ITInventoryPage() {
           asset_id: selectedAsset.asset_id,
           staff_number: assignStaff,
           staff_name: staff?.E_Full_Name || assignStaff,
+          performed_by: user?.email || "unknown",
         }),
       });
       if (res.ok) {
@@ -272,6 +302,7 @@ export default function ITInventoryPage() {
           asset_id: selectedAsset.asset_id,
           condition: returnCondition,
           notes: returnNotes,
+          performed_by: user?.email || "unknown",
         }),
       });
       if (res.ok) {
@@ -311,6 +342,35 @@ export default function ITInventoryPage() {
         setCsvText("");
         fetchData();
         alert(`Imported ${data.imported} assets successfully.`);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleScheduleMaintenance() {
+    if (!selectedAsset || !maintDate) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/it-inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "schedule_maintenance",
+          asset_id: selectedAsset.asset_id,
+          next_maintenance_date: maintDate,
+          maintenance_interval_days: maintInterval ? Number(maintInterval) : null,
+          notes: maintNotes,
+          performed_by: user?.email || "unknown",
+        }),
+      });
+      if (res.ok) {
+        setShowMaintenance(false);
+        setSelectedAsset(null);
+        setMaintDate("");
+        setMaintInterval("");
+        setMaintNotes("");
+        fetchData();
       }
     } finally {
       setSaving(false);
@@ -360,6 +420,7 @@ export default function ITInventoryPage() {
 
       {/* KPI Cards */}
       {stats && (
+        <>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <Card>
             <CardContent className="pt-4 pb-4">
@@ -404,6 +465,41 @@ export default function ITInventoryPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Financial & Maintenance KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="text-2xl font-bold">
+                {stats.total_value.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">SAR</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Total Purchase Value</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="text-2xl font-bold text-emerald-600">
+                {stats.total_book_value.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">SAR</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Current Book Value</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="text-2xl font-bold text-amber-600">
+                {stats.total_depreciation.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">SAR</span>
+              </div>
+              <p className="text-xs text-muted-foreground">Total Depreciation</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4 pb-4">
+              <div className="text-2xl font-bold text-purple-600">{stats.maintenance_due}</div>
+              <p className="text-xs text-muted-foreground">Maintenance Due (14d)</p>
+            </CardContent>
+          </Card>
+        </div>
+        </>
       )}
 
       {/* Type breakdown cards */}
@@ -608,6 +704,23 @@ export default function ITInventoryPage() {
                                 <RotateCcw className="h-4 w-4" />
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedAsset(asset);
+                                setMaintDate(asset.next_maintenance_date || "");
+                                setMaintInterval(
+                                  asset.maintenance_interval_days
+                                    ? String(asset.maintenance_interval_days)
+                                    : ""
+                                );
+                                setShowMaintenance(true);
+                              }}
+                              title="Schedule Maintenance"
+                            >
+                              <Wrench className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -737,8 +850,9 @@ export default function ITInventoryPage() {
                   onChange={(e) => setForm({ ...form, branch: e.target.value })}
                 >
                   <option value="">Select branch</option>
-                  <option value="0021-01">0021-01</option>
-                  <option value="0021-02">0021-02</option>
+                  {Object.entries(BRANCH_OPTIONS).map(([code, label]) => (
+                    <option key={code} value={code}>{label}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -759,6 +873,49 @@ export default function ITInventoryPage() {
                 placeholder="Optional notes"
                 className="mt-1"
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Useful Life (years)</label>
+                <Input
+                  type="number"
+                  value={form.useful_life_years}
+                  onChange={(e) => setForm({ ...form, useful_life_years: e.target.value })}
+                  placeholder="e.g. 5"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Salvage Value (SAR)</label>
+                <Input
+                  type="number"
+                  value={form.salvage_value}
+                  onChange={(e) => setForm({ ...form, salvage_value: e.target.value })}
+                  placeholder="e.g. 200"
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Next Maintenance</label>
+                <Input
+                  type="date"
+                  value={form.next_maintenance_date}
+                  onChange={(e) => setForm({ ...form, next_maintenance_date: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Maint. Interval (days)</label>
+                <Input
+                  type="number"
+                  value={form.maintenance_interval_days}
+                  onChange={(e) => setForm({ ...form, maintenance_interval_days: e.target.value })}
+                  placeholder="e.g. 90"
+                  className="mt-1"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -904,6 +1061,61 @@ export default function ITInventoryPage() {
             <Button onClick={handleCsvImport} disabled={saving || !csvText.trim()}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Schedule Maintenance Dialog ── */}
+      <Dialog open={showMaintenance} onOpenChange={setShowMaintenance}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Schedule Maintenance</DialogTitle>
+            <DialogDescription>
+              Set maintenance schedule for{" "}
+              <strong>{selectedAsset?.asset_id}</strong> ({selectedAsset?.brand}{" "}
+              {selectedAsset?.model}).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Next Maintenance Date *</label>
+              <Input
+                type="date"
+                value={maintDate}
+                onChange={(e) => setMaintDate(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">
+                Repeat Interval (days)
+              </label>
+              <Input
+                type="number"
+                value={maintInterval}
+                onChange={(e) => setMaintInterval(e.target.value)}
+                placeholder="e.g. 90 (auto re-schedules after completion)"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Notes</label>
+              <Input
+                value={maintNotes}
+                onChange={(e) => setMaintNotes(e.target.value)}
+                placeholder="e.g. Annual cleaning, firmware update"
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMaintenance(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleScheduleMaintenance} disabled={saving || !maintDate}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Schedule
             </Button>
           </DialogFooter>
         </DialogContent>

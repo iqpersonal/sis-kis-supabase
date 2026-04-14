@@ -7,6 +7,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import * as SecureStore from "expo-secure-store";
+import { API_BASE } from "../lib/api-config";
 
 interface ParentChild {
   studentNumber: string;
@@ -67,19 +68,17 @@ export function ParentProvider({ children: reactChildren }: { children: React.Re
 
   const signIn = async (username: string, password: string): Promise<boolean> => {
     try {
-      // Look up parent credentials in families collection
-      const q = query(
-        collection(db, "families"),
-        where("username", "==", username),
-        where("password", "==", password)
-      );
-      const snap = await getDocs(q);
-      if (snap.empty) return false;
-
-      const parentDoc = snap.docs[0].data();
+      // Use the same API as the dashboard for authentication
+      const res = await fetch(`${API_BASE}/parent-auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data.success || !data.family) return false;
+      const parentDoc = data.family;
       const famNum = parentDoc.family_number as string;
-
-      // Children are already embedded in the family document
       const childrenData = (parentDoc.children || []) as Array<{
         student_number: string;
         child_name: string;
@@ -87,7 +86,6 @@ export function ParentProvider({ children: reactChildren }: { children: React.Re
         current_section: string;
         gender: string;
       }>;
-
       const kids: ParentChild[] = childrenData.map((c) => ({
         studentNumber: c.student_number || "",
         fullName: c.child_name || "",
@@ -96,17 +94,14 @@ export function ParentProvider({ children: reactChildren }: { children: React.Re
         section: c.current_section || "",
         school: "",
       }));
-
       setFamilyNumber(famNum);
       setChildrenList(kids);
       if (kids.length > 0) setSelectedChild(kids[0]);
-
       // Persist session securely
       await SecureStore.setItemAsync(
         PARENT_SESSION_KEY,
         JSON.stringify({ familyNumber: famNum, children: kids })
       );
-
       return true;
     } catch {
       return false;

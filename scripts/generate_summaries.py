@@ -279,7 +279,10 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
          AND s.Child_Number  = fc.Child_Number
         JOIN Family f ON s.Family_Number = f.Family_Number
         LEFT JOIN Nationality n ON fc.Nationality_Code_Primary = n.Nationality_Code
-        LEFT JOIN Section sec ON r.Section_Code = sec.Section_Code
+        LEFT JOIN Section sec ON sec.Section_Code = r.Section_Code
+                             AND sec.Class_Code   = r.Class_Code
+                             AND sec.Major_Code   = r.Major_Code
+                             AND sec.Academic_Year = r.Academic_Year
         WHERE r.Academic_Year = ?
     """, year_val)
     student_name_map = {}   # student_number → full name
@@ -1125,8 +1128,16 @@ def build_summary_for_year(cursor, year, all_years, charge_type_term_map,
         total_honor = len(honor_students)
         honor_rate = round(total_honor / total_students_exam * 100, 1) if total_students_exam > 0 else 0
 
-        # Top 20 honor students (sorted by class, then avg desc)
-        top_honor = sorted(honor_students, key=lambda x: (x["className"], -x["avg"]))[:20]
+        # All honor students (sorted by class, then avg desc)
+        # Store lightweight detail (section only) to stay within Firestore 1MB limit
+        top_honor = sorted(honor_students, key=lambda x: (x["className"], -x["avg"]))
+        for s in top_honor:
+            full_detail = s.get("detail", {})
+            s["detail"] = {
+                "section": full_detail.get("section", ""),
+                "gender": full_detail.get("gender", ""),
+                "nationality": full_detail.get("nationality", ""),
+            }
 
         # Honor by class
         honor_by_class = []

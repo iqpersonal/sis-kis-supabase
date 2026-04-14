@@ -24,7 +24,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.kis.sis",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -40,7 +45,26 @@
           "icon": "./assets/icon.png",
           "color": "#2563eb"
         }
-      ]
-    ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow KiS SiS to access camera for barcode scanning and product photos"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow KiS SiS to access photos for product images"
+        }
+      ],
+      "expo-sharing"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b642c8c1-170d-4447-a640-14278dafc05f"
+      }
+    }
   }
 }

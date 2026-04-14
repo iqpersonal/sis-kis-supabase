@@ -31,6 +31,11 @@ import {
   Clock,
   Lock,
   ClipboardList,
+  FileText,
+  Shield,
+  MessageSquare,
+  Library,
+  BarChart3,
 } from "lucide-react";
 import {
   LineChart,
@@ -112,9 +117,16 @@ interface StudentProgress {
   years: Record<string, YearData>;
   financials?: Record<string, YearFinancials>;
   updated_at: string;
+  passport_id?: string;
+  iqama_number?: string;
+  passport_expiry?: string | null;
+  iqama_expiry?: string | null;
+  nationality?: string;
+  date_of_birth?: string;
+  religion?: string;
 }
 
-type TabKey = "academics" | "financials" | "attendance" | "progress_report";
+type TabKey = "academics" | "financials" | "attendance" | "progress_report" | "documents" | "messages" | "library" | "academic_report";
 
 /* ------------------------------------------------------------------ */
 /*  Color helpers                                                     */
@@ -202,6 +214,78 @@ export default function ParentDashboardPage() {
   const [prSelectedMonth, setPrSelectedMonth] = useState<string>("all");
   const PR_MONTHS = ["September","October","November","December","January","February","March","April","May"];
 
+  // Messages state
+  interface MessageItem {
+    id: string;
+    title: string;
+    body: string;
+    sender: string;
+    audience: string;
+    created_at: string;
+    read: boolean;
+  }
+  const [messagesData, setMessagesData] = useState<MessageItem[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<MessageItem | null>(null);
+
+  /* fetch messages for selected child + family */
+  const fetchMessages = useCallback(async () => {
+    if (!family) return;
+    setMessagesLoading(true);
+    try {
+      const params = new URLSearchParams({ familyNumber: family.family_number });
+      // Derive school from the latest year in progress
+      if (progress?.years) {
+        const sorted = Object.keys(progress.years).sort();
+        const latest = sorted[sorted.length - 1];
+        if (latest && progress.years[latest]?.school) {
+          params.set("school", progress.years[latest].school);
+        }
+      }
+      if (selectedChild?.current_class) params.set("class", selectedChild.current_class);
+      if (selectedChild?.current_section) params.set("section", selectedChild.current_section);
+      const res = await fetch(`/api/parent/messages?${params}`);
+      if (res.ok) {
+        const json = await res.json();
+        setMessagesData(json.messages || []);
+      } else {
+        setMessagesData([]);
+      }
+    } catch {
+      setMessagesData([]);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [family, progress, selectedChild]);
+
+  // Library state
+  interface LibraryBorrowing {
+    id: string;
+    book_title: string;
+    book_title_ar: string;
+    author: string;
+    borrow_date: string;
+    due_date: string;
+    return_date: string | null;
+    status: string;
+  }
+  const [libraryData, setLibraryData] = useState<LibraryBorrowing[]>([]);
+  const [librarySummary, setLibrarySummary] = useState({ borrowed: 0, overdue: 0, returned: 0 });
+  const [libraryLoading, setLibraryLoading] = useState(false);
+
+  const fetchLibrary = useCallback(async (studentNumber: string) => {
+    setLibraryLoading(true);
+    try {
+      const res = await fetch(`/api/parent/library?studentNumber=${encodeURIComponent(studentNumber)}`);
+      if (res.ok) {
+        const json = await res.json();
+        setLibraryData(json.borrowings || []);
+        setLibrarySummary(json.summary || { borrowed: 0, overdue: 0, returned: 0 });
+      }
+    } catch { /* ignore */ }
+    setLibraryLoading(false);
+  }, []);
+
   /* fetch progress reports for selected child */
   const fetchProgressReports = useCallback(async (studentNumber: string) => {
     setProgressLoading2(true);
@@ -280,6 +364,33 @@ export default function ParentDashboardPage() {
       fetchAttendance(selectedChild.student_number);
     }
   }, [selectedChild, activeTab, fetchAttendance]);
+
+  useEffect(() => {
+    if (activeTab === "messages") {
+      fetchMessages();
+    }
+  }, [activeTab, fetchMessages]);
+
+  useEffect(() => {
+    if (selectedChild && activeTab === "library") {
+      fetchLibrary(selectedChild.student_number);
+    }
+  }, [selectedChild, activeTab, fetchLibrary]);
+
+  /* mark message read */
+  const markMessageRead = useCallback(async (msg: MessageItem) => {
+    if (!family || msg.read) return;
+    setMessagesData((prev) =>
+      prev.map((m) => (m.id === msg.id ? { ...m, read: true } : m))
+    );
+    try {
+      await fetch("/api/parent/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: msg.id, familyNumber: family.family_number }),
+      });
+    } catch { /* ignore */ }
+  }, [family]);
 
   /* fetch parent notifications */
   useEffect(() => {
@@ -636,6 +747,60 @@ export default function ParentDashboardPage() {
               >
                 <ClipboardList className="h-4 w-4" />
                 Progress Report
+              </button>
+              <button
+                onClick={() => setActiveTab("documents")}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all ${
+                  activeTab === "documents"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <FileText className="h-4 w-4" />
+                Documents
+              </button>
+              <button
+                onClick={() => setActiveTab("messages")}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all ${
+                  activeTab === "messages"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Messages
+                {messagesData.filter((m) => !m.read).length > 0 && (
+                  <span className="ml-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                    {messagesData.filter((m) => !m.read).length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab("library")}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all ${
+                  activeTab === "library"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <Library className="h-4 w-4" />
+                Library
+                {librarySummary.overdue > 0 && (
+                  <span className="ml-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                    {librarySummary.overdue}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab("academic_report")}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all ${
+                  activeTab === "academic_report"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                <BarChart3 className="h-4 w-4" />
+                Report
               </button>
             </div>
 
@@ -1881,6 +2046,615 @@ export default function ParentDashboardPage() {
                 )}
               </>
             )}
+
+            {/* ═══════════════════════════════════════════════════ */}
+            {/*  DOCUMENTS TAB                                     */}
+            {/* ═══════════════════════════════════════════════════ */}
+            {activeTab === "documents" && progress && (() => {
+              const today = new Date();
+              function docStatus(expiryStr: string | null | undefined) {
+                if (!expiryStr) return { status: "missing" as const, daysLeft: null, label: "Not Available", color: "text-muted-foreground", bg: "bg-gray-50 border-gray-200", icon: "➖" };
+                const exp = new Date(expiryStr);
+                if (isNaN(exp.getTime())) return { status: "missing" as const, daysLeft: null, label: "Not Available", color: "text-muted-foreground", bg: "bg-gray-50 border-gray-200", icon: "➖" };
+                const days = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                if (days < 0) return { status: "expired" as const, daysLeft: days, label: "Expired", color: "text-red-700", bg: "bg-red-50 border-red-200", icon: "❌" };
+                if (days <= 30) return { status: "expiring" as const, daysLeft: days, label: "Expiring Soon", color: "text-amber-700", bg: "bg-amber-50 border-amber-200", icon: "⚠️" };
+                return { status: "valid" as const, daysLeft: days, label: "Valid", color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200", icon: "✅" };
+              }
+
+              const passport = docStatus(progress.passport_expiry);
+              const iqama = docStatus(progress.iqama_expiry);
+
+              const docs = [
+                {
+                  title: "Passport",
+                  number: progress.passport_id || "—",
+                  expiry: progress.passport_expiry ? new Date(progress.passport_expiry).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—",
+                  ...passport,
+                },
+                {
+                  title: "Iqama / National ID",
+                  number: progress.iqama_number || "—",
+                  expiry: progress.iqama_expiry ? new Date(progress.iqama_expiry).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—",
+                  ...iqama,
+                },
+              ];
+
+              return (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2 mb-6">
+                    {docs.map((d) => (
+                      <Card key={d.title} className={`border ${d.bg}`}>
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-base flex items-center gap-2">
+                              {d.title === "Passport" ? (
+                                <FileText className="h-4 w-4 text-blue-600" />
+                              ) : (
+                                <Shield className="h-4 w-4 text-purple-600" />
+                              )}
+                              {d.title}
+                            </CardTitle>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${d.bg} ${d.color}`}>
+                              {d.icon} {d.label}
+                            </span>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Number</span>
+                            <span className="font-mono font-medium">{d.number}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Expiry Date</span>
+                            <span className="font-medium">{d.expiry}</span>
+                          </div>
+                          {d.daysLeft != null && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-muted-foreground">
+                                {d.daysLeft >= 0 ? "Days Remaining" : "Expired By"}
+                              </span>
+                              <span className={`font-bold ${d.color}`}>
+                                {Math.abs(d.daysLeft)} days
+                              </span>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* Additional Student Information */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Student Information</CardTitle>
+                      <CardDescription>Additional details from records</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[
+                          { label: "Student Number", value: progress.student_number },
+                          { label: "Full Name", value: progress.student_name },
+                          { label: "Gender", value: progress.gender || "—" },
+                          { label: "Nationality", value: progress.nationality || "—" },
+                          { label: "Date of Birth", value: progress.date_of_birth ? new Date(progress.date_of_birth).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
+                          { label: "Religion", value: progress.religion || "—" },
+                        ].map((item) => (
+                          <div key={item.label} className="flex justify-between rounded-lg border px-4 py-3">
+                            <span className="text-sm text-muted-foreground">{item.label}</span>
+                            <span className="text-sm font-medium">{item.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              );
+            })()}
+
+            {/* ═══════════════════════════════════════════════════ */}
+            {/*  MESSAGES TAB                                      */}
+            {/* ═══════════════════════════════════════════════════ */}
+            {activeTab === "messages" && (() => {
+              const unreadCount = messagesData.filter((m) => !m.read).length;
+
+              function fmtDate(iso: string) {
+                try {
+                  const d = new Date(iso);
+                  const now = new Date();
+                  const diff = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+                  if (diff === 0) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                  if (diff === 1) return "Yesterday";
+                  if (diff < 7) return `${diff}d ago`;
+                  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                } catch { return ""; }
+              }
+
+              function audienceBadge(a: string) {
+                switch (a) {
+                  case "all": return "bg-gray-100 text-gray-700";
+                  case "school": return "bg-blue-100 text-blue-700";
+                  case "class": return "bg-purple-100 text-purple-700";
+                  case "family": return "bg-emerald-100 text-emerald-700";
+                  default: return "bg-gray-100 text-gray-700";
+                }
+              }
+
+              return (
+                <>
+                  {unreadCount > 0 && (
+                    <p className="mb-4 text-sm font-semibold text-blue-600">
+                      {unreadCount} unread message{unreadCount !== 1 ? "s" : ""}
+                    </p>
+                  )}
+
+                  {messagesLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600" />
+                    </div>
+                  ) : messagesData.length === 0 ? (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+                        <MessageSquare className="mb-3 h-12 w-12 text-muted-foreground/30" />
+                        <p className="text-muted-foreground">No messages from school yet.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        {messagesData.length} message{messagesData.length !== 1 ? "s" : ""}
+                      </p>
+                      {messagesData.map((msg) => (
+                        <Card
+                          key={msg.id}
+                          className={`cursor-pointer transition-all hover:shadow-md ${
+                            !msg.read ? "border-blue-300 border-l-4" : ""
+                          }`}
+                          onClick={() => {
+                            setSelectedMessage(msg);
+                            if (!msg.read) markMessageRead(msg);
+                          }}
+                        >
+                          <CardContent className="py-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-1 flex items-center gap-2">
+                                  {!msg.read && (
+                                    <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                                  )}
+                                  <h4 className={`text-sm ${!msg.read ? "font-bold" : "font-medium"}`}>
+                                    {msg.title}
+                                  </h4>
+                                </div>
+                                <p className="line-clamp-2 text-sm text-muted-foreground">
+                                  {msg.body}
+                                </p>
+                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{msg.sender}</span>
+                                  <span>•</span>
+                                  <span>{fmtDate(msg.created_at)}</span>
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${audienceBadge(msg.audience)}`}>
+                                    {msg.audience}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Message Detail Dialog */}
+                  {selectedMessage && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                         onClick={() => setSelectedMessage(null)}>
+                      <Card className="w-full max-w-lg max-h-[80vh] overflow-hidden"
+                            onClick={(e) => e.stopPropagation()}>
+                        <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="text-lg">{selectedMessage.title}</CardTitle>
+                            <CardDescription className="mt-1">
+                              From: {selectedMessage.sender} • {fmtDate(selectedMessage.created_at)}
+                            </CardDescription>
+                          </div>
+                          <button
+                            onClick={() => setSelectedMessage(null)}
+                            className="ml-2 rounded-md p-1 hover:bg-muted"
+                          >
+                            ✕
+                          </button>
+                        </CardHeader>
+                        <CardContent className="max-h-[50vh] overflow-y-auto">
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {selectedMessage.body}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
+            {/* ═══════════════════════════════════════════════════ */}
+            {/*  LIBRARY TAB                                       */}
+            {/* ═══════════════════════════════════════════════════ */}
+            {activeTab === "library" && (() => {
+              function daysBetween(from: Date, to: Date) {
+                return Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+              }
+
+              const active = libraryData.filter((b) => b.status === "borrowed" || b.status === "overdue");
+              const returned = libraryData.filter((b) => b.status === "returned");
+
+              return (
+                <>
+                  {libraryLoading ? (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600" />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary cards */}
+                      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+                        <Card>
+                          <CardContent className="flex flex-col items-center py-6">
+                            <span className="mb-1 text-3xl">📖</span>
+                            <span className="text-2xl font-bold">{librarySummary.borrowed}</span>
+                            <span className="text-sm text-muted-foreground">Borrowed</span>
+                          </CardContent>
+                        </Card>
+                        <Card className={librarySummary.overdue > 0 ? "border-red-200 bg-red-50" : ""}>
+                          <CardContent className="flex flex-col items-center py-6">
+                            <span className="mb-1 text-3xl">⚠️</span>
+                            <span className={`text-2xl font-bold ${librarySummary.overdue > 0 ? "text-red-600" : ""}`}>
+                              {librarySummary.overdue}
+                            </span>
+                            <span className="text-sm text-muted-foreground">Overdue</span>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="flex flex-col items-center py-6">
+                            <span className="mb-1 text-3xl">✅</span>
+                            <span className="text-2xl font-bold">{librarySummary.returned}</span>
+                            <span className="text-sm text-muted-foreground">Returned</span>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      {/* Currently borrowed */}
+                      {active.length > 0 ? (
+                        <>
+                          <h3 className="mb-3 text-base font-semibold">Currently Borrowed</h3>
+                          <div className="mb-6 space-y-3">
+                            {active.map((b) => {
+                              const dueDate = new Date(b.due_date);
+                              const daysLeft = daysBetween(new Date(), dueDate);
+                              const isOverdue = b.status === "overdue";
+                              return (
+                                <Card key={b.id} className={`border-l-4 ${isOverdue ? "border-l-red-500" : "border-l-blue-500"}`}>
+                                  <CardContent className="py-4">
+                                    <div className="flex items-start justify-between">
+                                      <div>
+                                        <p className="font-semibold">{b.book_title}</p>
+                                        {b.book_title_ar && b.book_title_ar !== b.book_title && (
+                                          <p className="text-sm text-muted-foreground">{b.book_title_ar}</p>
+                                        )}
+                                        {b.author && <p className="text-sm text-muted-foreground">by {b.author}</p>}
+                                      </div>
+                                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                        isOverdue ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                                      }`}>
+                                        {isOverdue ? "Overdue" : "Borrowed"}
+                                      </span>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                                      <div>
+                                        <span className="text-muted-foreground">Borrowed</span>
+                                        <p className="font-medium">{new Date(b.borrow_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</p>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground">Due</span>
+                                        <p className={`font-medium ${isOverdue ? "text-red-600" : ""}`}>
+                                          {dueDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground">{daysLeft < 0 ? "Overdue by" : "Remaining"}</span>
+                                        <p className={`font-bold ${daysLeft < 0 ? "text-red-600" : daysLeft <= 3 ? "text-amber-600" : "text-emerald-600"}`}>
+                                          {Math.abs(daysLeft)} days
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : (
+                        <Card className="mb-6">
+                          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                            <span className="mb-3 text-5xl">📚</span>
+                            <p className="text-muted-foreground">No books currently borrowed</p>
+                            <p className="text-sm text-muted-foreground">Books checked out from the library will appear here</p>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* History */}
+                      {returned.length > 0 && (
+                        <>
+                          <h3 className="mb-3 text-base font-semibold">Borrowing History</h3>
+                          <Card>
+                            <CardContent className="divide-y p-0">
+                              {returned.slice(0, 20).map((b) => (
+                                <div key={b.id} className="flex items-center gap-3 px-4 py-3">
+                                  <span>✅</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium">{b.book_title}</p>
+                                    {b.author && <p className="truncate text-xs text-muted-foreground">by {b.author}</p>}
+                                  </div>
+                                  <div className="text-right text-xs text-muted-foreground">
+                                    <p>Returned</p>
+                                    <p className="font-medium">
+                                      {b.return_date ? new Date(b.return_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </CardContent>
+                          </Card>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
+
+            {/* ═══════════════════════════════════════════════════ */}
+            {/*  ACADEMIC REPORT TAB                               */}
+            {/* ═══════════════════════════════════════════════════ */}
+            {activeTab === "academic_report" && progress && (() => {
+              function gp(g: number) { return g >= 90 ? 4 : g >= 80 ? 3 : g >= 70 ? 2 : g >= 60 ? 1 : 0; }
+              function lg(g: number) { return g >= 90 ? "A" : g >= 80 ? "B" : g >= 70 ? "C" : g >= 60 ? "D" : "F"; }
+
+              const yearKeys = Object.keys(progress.years).sort();
+              const yearArr = yearKeys.map((yr) => {
+                const yd = progress.years[yr];
+                const subs = yd.subjects || [];
+                const validSubs = subs.filter((s) => typeof s.grade === "number" && s.grade > 0);
+                return { year: yr, ...yd, validSubs };
+              });
+
+              // Per-year GPA
+              const gpaPerYear = yearArr.map((yd) => ({
+                year: yd.year,
+                className: yd.class_name,
+                avg: yd.overall_avg,
+                gpa: yd.validSubs.length > 0
+                  ? yd.validSubs.reduce((s, sub) => s + gp(sub.grade), 0) / yd.validSubs.length
+                  : 0,
+              }));
+
+              // Cumulative
+              let cumGpSum = 0, cumCount = 0;
+              for (const yd of yearArr) {
+                for (const s of yd.validSubs) { cumGpSum += gp(s.grade); cumCount++; }
+              }
+              const cumulativeGPA = cumCount > 0 ? cumGpSum / cumCount : 0;
+              const allAvgs = yearArr.map((y) => y.overall_avg).filter((v) => typeof v === "number");
+              const latestAvg = allAvgs[allAvgs.length - 1] ?? 0;
+              const trend = allAvgs.length >= 2 ? allAvgs[allAvgs.length - 1] - allAvgs[allAvgs.length - 2] : null;
+
+              // Subject analysis
+              const latestYear = yearArr[yearArr.length - 1];
+              const latestSubs = latestYear?.validSubs?.sort((a, b) => b.grade - a.grade) ?? [];
+              const strongest = latestSubs.slice(0, 3);
+              const weakest = [...latestSubs].reverse().slice(0, 3);
+
+              return (
+                <>
+                  {/* GPA Summary */}
+                  <div className="mb-6 grid gap-4 sm:grid-cols-4">
+                    <Card className="border-emerald-200 bg-emerald-50">
+                      <CardContent className="flex flex-col items-center py-6">
+                        <span className="text-3xl font-extrabold text-emerald-700">{cumulativeGPA.toFixed(2)}</span>
+                        <span className="text-sm text-emerald-600">Cumulative GPA</span>
+                        <span className="text-xs text-muted-foreground">/ 4.00</span>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="flex flex-col items-center py-6">
+                        <span className={`text-3xl font-extrabold ${gradeColor(latestAvg).replace("#", "text-[#") + "]"}`}>
+                          {latestAvg.toFixed(1)}%
+                        </span>
+                        <span className="text-sm text-muted-foreground">Latest Average</span>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="flex flex-col items-center py-6">
+                        <span className="text-3xl font-extrabold">{yearKeys.length}</span>
+                        <span className="text-sm text-muted-foreground">Academic Years</span>
+                      </CardContent>
+                    </Card>
+                    {trend !== null && (
+                      <Card>
+                        <CardContent className="flex flex-col items-center py-6">
+                          <span className={`text-3xl font-extrabold ${trend >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                            {trend >= 0 ? "▲" : "▼"} {Math.abs(trend).toFixed(1)}
+                          </span>
+                          <span className="text-sm text-muted-foreground">Year Trend</span>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+
+                  {/* Average Trend */}
+                  {gpaPerYear.length > 0 && (
+                    <Card className="mb-6">
+                      <CardHeader>
+                        <CardTitle className="text-base">Average Trend</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {gpaPerYear.map((item) => {
+                            const pct = Math.min((item.avg / 100) * 100, 100);
+                            return (
+                              <div key={item.year} className="flex items-center gap-3">
+                                <div className="w-24 text-right">
+                                  <p className="text-xs font-medium">{item.className || item.year}</p>
+                                  <p className="text-[10px] text-muted-foreground">20{item.year}</p>
+                                </div>
+                                <div className="flex-1">
+                                  <div className="h-4 overflow-hidden rounded-full bg-gray-100">
+                                    <div
+                                      className="h-full rounded-full transition-all"
+                                      style={{ width: `${pct}%`, backgroundColor: gradeColor(item.avg) }}
+                                    />
+                                  </div>
+                                </div>
+                                <div className="w-16 text-right">
+                                  <span className="text-sm font-bold" style={{ color: gradeColor(item.avg) }}>
+                                    {item.avg.toFixed(1)}
+                                  </span>
+                                  <p className="text-[10px] text-muted-foreground">GPA {item.gpa.toFixed(2)}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Subject Strength Analysis */}
+                  {latestSubs.length > 0 && (
+                    <div className="mb-6 grid gap-4 sm:grid-cols-2">
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base">🌟 Strongest Subjects</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {strongest.map((s) => (
+                            <div key={s.subject} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                              <span className="text-sm">{s.subject}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold" style={{ color: gradeColor(s.grade) }}>
+                                  {s.grade.toFixed(0)}%
+                                </span>
+                                <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${gradeBg(s.grade)}`}>
+                                  {lg(s.grade)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base">⚠️ Needs Attention</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {weakest.map((s) => (
+                            <div key={s.subject} className="flex items-center justify-between rounded-lg border px-3 py-2">
+                              <span className="text-sm">{s.subject}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold" style={{ color: gradeColor(s.grade) }}>
+                                  {s.grade.toFixed(0)}%
+                                </span>
+                                <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${gradeBg(s.grade)}`}>
+                                  {lg(s.grade)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {/* All Subjects Bar */}
+                  {latestSubs.length > 0 && (
+                    <Card className="mb-6">
+                      <CardHeader>
+                        <CardTitle className="text-base">All Subjects — {latestYear?.class_name || yearKeys[yearKeys.length - 1]}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        {latestSubs.map((s) => (
+                          <div key={s.subject} className="flex items-center gap-3">
+                            <span className="w-32 truncate text-xs">{s.subject}</span>
+                            <div className="flex-1">
+                              <div className="h-3.5 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{ width: `${s.grade}%`, backgroundColor: gradeColor(s.grade) }}
+                                />
+                              </div>
+                            </div>
+                            <span className="w-10 text-right text-xs font-bold" style={{ color: gradeColor(s.grade) }}>
+                              {s.grade.toFixed(0)}
+                            </span>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Year-over-Year Table */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Year-over-Year Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent className="overflow-x-auto p-0">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-emerald-600 text-white">
+                            <th className="px-4 py-2 text-left font-medium">Year</th>
+                            <th className="px-4 py-2 text-center font-medium">Class</th>
+                            <th className="px-4 py-2 text-center font-medium">Avg</th>
+                            <th className="px-4 py-2 text-center font-medium">GPA</th>
+                            <th className="px-4 py-2 text-center font-medium">Grade</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gpaPerYear.map((item) => (
+                            <tr key={item.year} className="border-b">
+                              <td className="px-4 py-2 font-medium">20{item.year}</td>
+                              <td className="px-4 py-2 text-center">{item.className}</td>
+                              <td className="px-4 py-2 text-center font-semibold" style={{ color: gradeColor(item.avg) }}>
+                                {item.avg.toFixed(1)}
+                              </td>
+                              <td className="px-4 py-2 text-center font-semibold">{item.gpa.toFixed(2)}</td>
+                              <td className="px-4 py-2 text-center">
+                                <span className={`rounded px-2 py-0.5 text-xs font-bold ${gradeBg(item.avg)}`}>
+                                  {lg(item.avg)}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="bg-gray-50 font-bold">
+                            <td className="px-4 py-2">Cumulative</td>
+                            <td className="px-4 py-2 text-center">—</td>
+                            <td className="px-4 py-2 text-center">
+                              {allAvgs.length > 0 ? (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(1) : "—"}
+                            </td>
+                            <td className="px-4 py-2 text-center">{cumulativeGPA.toFixed(2)}</td>
+                            <td className="px-4 py-2 text-center">
+                              <span className={`rounded px-2 py-0.5 text-xs font-bold ${gradeBg(allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0)}`}>
+                                {lg(allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0)}
+                              </span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </CardContent>
+                  </Card>
+                </>
+              );
+            })()}
           </>
         )}
       </div>

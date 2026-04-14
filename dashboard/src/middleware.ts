@@ -4,24 +4,25 @@ import type { NextRequest } from "next/server";
 /**
  * Middleware: protect /dashboard routes.
  *
- * Firebase Auth runs client-side, so we can't validate JWTs here without
- * firebase-admin (which requires Node runtime).  Instead, the client stores
- * a lightweight "__session" cookie when the user signs in.  If the cookie
- * is absent we redirect to /login.
+ * IMPORTANT: Firebase Hosting CDN only forwards the "__session" cookie to
+ * Cloud Functions — all other cookies are stripped.  Therefore every portal
+ * (admin, parent, student, teacher) stores its session indicator in the
+ * same "__session" cookie with a distinguishing value:
+ *   admin   → Firebase ID token (long JWT string)
+ *   parent  → "parent"
+ *   student → "student"
+ *   teacher → "teacher"
  *
- * For a production setup you can:
- *   1. Set an HttpOnly session cookie via a server action / API route
- *      after the user signs in.
- *   2. Validate the cookie's Firebase ID token here using firebase-admin.
+ * The middleware only checks for the cookie's *existence* (not its value)
+ * because we cannot import firebase-admin in Edge middleware.
  */
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const session = request.cookies.get("__session")?.value;
 
   // Guard /parent/dashboard routes (parents) — check BEFORE /dashboard
   if (pathname.startsWith("/parent/dashboard")) {
-    const parentSession = request.cookies.get("__parent_session")?.value;
-
-    if (!parentSession) {
+    if (!session) {
       const loginUrl = new URL("/parent/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
@@ -29,9 +30,7 @@ export function middleware(request: NextRequest) {
 
   // Guard /student/dashboard routes (students)
   else if (pathname.startsWith("/student/dashboard")) {
-    const studentSession = request.cookies.get("__student_session")?.value;
-
-    if (!studentSession) {
+    if (!session) {
       const loginUrl = new URL("/student/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
@@ -39,9 +38,7 @@ export function middleware(request: NextRequest) {
 
   // Guard /teacher/dashboard routes (teachers)
   else if (pathname.startsWith("/teacher/dashboard")) {
-    const teacherSession = request.cookies.get("__teacher_session")?.value;
-
-    if (!teacherSession) {
+    if (!session) {
       const loginUrl = new URL("/teacher/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
@@ -49,8 +46,6 @@ export function middleware(request: NextRequest) {
 
   // Guard /dashboard routes (admin)
   else if (pathname.startsWith("/dashboard")) {
-    const session = request.cookies.get("__session")?.value;
-
     if (!session) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);

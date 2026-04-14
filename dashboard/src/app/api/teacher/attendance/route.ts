@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await verifyAuthOrPortalSession(req, "__teacher_session");
+  const auth = await verifyAuthOrPortalSession(req, "teacher");
   if (!auth.ok) return auth.response;
 
   try {

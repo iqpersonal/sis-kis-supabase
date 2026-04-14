@@ -2,7 +2,6 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BarChart3, Home } from "lucide-react";
+import { BarChart3 } from "lucide-react";
+import { LoginLayout } from "@/components/login-layout";
 
 export default function LoginPage() {
   return (
@@ -71,19 +71,16 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
-      <div className="absolute top-4 left-4">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-          <Home className="h-4 w-4" />
-          Home
-        </Link>
-      </div>
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <BarChart3 className="h-6 w-6" />
+    <LoginLayout
+      portalLabel="Admin Dashboard"
+      portalDescription="Access analytics, reports, and manage your school's data from one powerful dashboard."
+    >
+      <Card className="border-0 shadow-xl">
+        <CardHeader className="text-center pb-4">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
+            <BarChart3 className="h-7 w-7" />
           </div>
-          <CardTitle className="text-2xl">Smart Report Dashboard</CardTitle>
+          <CardTitle className="text-2xl font-bold">Smart Report Dashboard</CardTitle>
           <CardDescription>
             {isSignUp
               ? "Create an account to get started"
@@ -93,7 +90,7 @@ function LoginForm() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -109,6 +106,7 @@ function LoginForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
 
@@ -124,10 +122,11 @@ function LoginForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
+                className="h-11"
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full h-11 font-semibold" disabled={loading}>
               {loading
                 ? "Please wait…"
                 : isSignUp
@@ -151,6 +150,6 @@ function LoginForm() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </LoginLayout>
   );
 }

@@ -87,8 +87,8 @@ function buildSummary(sales: SaleDoc[]) {
 
     totalTransactions++;
     const paid = s.paid_amount ?? s.total_amount ?? 0;
-    const sub = s.subtotal ?? (paid / 1.15);
-    const vat = s.vat_amount ?? (paid - sub);
+    const sub = typeof s.subtotal === "number" ? s.subtotal : 0;
+    const vat = typeof s.vat_amount === "number" ? s.vat_amount : 0;
     totalRevenue += paid;
     totalSubtotal += sub;
     totalVAT += vat;

@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore";
 import { getAuth, type Auth } from "firebase/auth";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -27,6 +28,7 @@ function getFirebaseApp(): FirebaseApp {
 let _db: Firestore | undefined;
 let _auth: Auth | undefined;
 let _analytics: Analytics | undefined;
+let _storage: FirebaseStorage | undefined;
 
 export function getDb(): Firestore {
   if (!_db) {
@@ -48,6 +50,11 @@ export function getDb(): Firestore {
 export function getFirebaseAuth(): Auth {
   if (!_auth) _auth = getAuth(getFirebaseApp());
   return _auth;
+}
+
+export function getFirebaseStorage(): FirebaseStorage {
+  if (!_storage) _storage = getStorage(getFirebaseApp());
+  return _storage;
 }
 
 /** Returns Analytics instance (browser only). */

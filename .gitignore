@@ -58,3 +58,6 @@ scripts/.upload_hashes.json
 
 # ── Vercel ──
 .vercel
+
+# -- Backups --
+backups/

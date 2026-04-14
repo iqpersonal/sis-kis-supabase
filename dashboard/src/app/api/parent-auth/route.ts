@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { verifyPassword, hashPassword } from "@/lib/password";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+/** Handle CORS preflight for mobile app requests */
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 /**
  * POST /api/parent-auth
  * Verify parent credentials against the families collection.
@@ -17,7 +28,7 @@ export async function POST(req: NextRequest) {
     if (!username || !password) {
       return NextResponse.json(
         { error: "Username and password are required" },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
 
@@ -30,7 +41,7 @@ export async function POST(req: NextRequest) {
     if (!indexDoc.exists) {
       return NextResponse.json(
         { error: "System not configured. Please contact administrator." },
-        { status: 500 }
+        { status: 500, headers: CORS_HEADERS }
       );
     }
 
@@ -40,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!familyNumber) {
       return NextResponse.json(
         { error: "Invalid username or password" },
-        { status: 401 }
+        { status: 401, headers: CORS_HEADERS }
       );
     }
 
@@ -53,7 +64,7 @@ export async function POST(req: NextRequest) {
     if (!familyDoc.exists) {
       return NextResponse.json(
         { error: "Invalid username or password" },
-        { status: 401 }
+        { status: 401, headers: CORS_HEADERS }
       );
     }
 
@@ -67,7 +78,7 @@ export async function POST(req: NextRequest) {
     if (!match) {
       return NextResponse.json(
         { error: "Invalid username or password" },
-        { status: 401 }
+        { status: 401, headers: CORS_HEADERS }
       );
     }
 
@@ -83,12 +94,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       family: safeFamily,
-    });
+    }, { headers: CORS_HEADERS });
   } catch (err) {
     console.error("Parent auth error:", err);
     return NextResponse.json(
       { error: "An unexpected error occurred" },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }

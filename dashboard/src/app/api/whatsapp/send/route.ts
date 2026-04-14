@@ -60,7 +60,8 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Collect phone numbers from families ──
-    const phones = await collectPhones(audience, audience_filter);
+    const recipient = audience_filter?.recipient || "father";
+    const phones = await collectPhones(audience, audience_filter, recipient);
 
     if (phones.length === 0) {
       return NextResponse.json(
@@ -133,7 +134,8 @@ export async function POST(req: NextRequest) {
 
 async function collectPhones(
   audience: string,
-  filter?: Record<string, unknown>
+  filter?: Record<string, unknown>,
+  recipient: string = "father"
 ): Promise<string[]> {
   const phones = new Set<string>();
 
@@ -144,7 +146,7 @@ async function collectPhones(
       .where("family_number", "==", String(filter.family_number))
       .limit(1)
       .get();
-    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones));
+    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones, recipient));
   } else if (audience === "school" && filter?.school) {
     // All families whose children are in a specific school
     const regSnap = await adminDb
@@ -156,7 +158,7 @@ async function collectPhones(
       const fn = doc.data().Family_Number;
       if (fn) familyNumbers.add(String(fn));
     });
-    await fetchFamilyPhones([...familyNumbers], phones);
+    await fetchFamilyPhones([...familyNumbers], phones, recipient);
   } else if (audience === "class" && filter?.school) {
     // Families with children in specific classes/sections
     const targets = (filter.targets as { class: string; section?: string }[]) || [];
@@ -175,11 +177,11 @@ async function collectPhones(
         if (fn) familyNumbers.add(String(fn));
       });
     }
-    await fetchFamilyPhones([...familyNumbers], phones);
+    await fetchFamilyPhones([...familyNumbers], phones, recipient);
   } else {
     // "all" — every family with a phone
     const snap = await adminDb.collection("families").get();
-    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones));
+    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones, recipient));
   }
 
   return [...phones];
@@ -187,9 +189,15 @@ async function collectPhones(
 
 function addFamilyPhones(
   data: FirebaseFirestore.DocumentData,
-  set: Set<string>
+  set: Set<string>,
+  recipient: string = "father"
 ) {
-  for (const field of ["father_phone", "mother_phone"]) {
+  const fields =
+    recipient === "father" ? ["father_phone"] :
+    recipient === "mother" ? ["mother_phone"] :
+    ["father_phone", "mother_phone"];
+
+  for (const field of fields) {
     const raw = data[field];
     if (raw && typeof raw === "string" && raw.trim().length >= 9) {
       const normalized = normalizePhone(raw.trim());
@@ -200,7 +208,8 @@ function addFamilyPhones(
 
 async function fetchFamilyPhones(
   familyNumbers: string[],
-  phones: Set<string>
+  phones: Set<string>,
+  recipient: string = "father"
 ) {
   // Firestore "in" supports up to 30 values per query
   for (let i = 0; i < familyNumbers.length; i += 30) {
@@ -209,6 +218,6 @@ async function fetchFamilyPhones(
       .collection("families")
       .where("family_number", "in", chunk)
       .get();
-    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones));
+    snap.docs.forEach((doc) => addFamilyPhones(doc.data(), phones, recipient));
   }
 }

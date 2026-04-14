@@ -11,14 +11,16 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useNavigationContainerRef } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useParent } from "@/context/parent-context";
 import { colors, spacing, fontSize, commonStyles } from "@/lib/theme";
+import { CommonActions } from "@react-navigation/native";
 
 export default function ParentLogin() {
   const router = useRouter();
+  const navRef = useNavigationContainerRef();
   const { signIn } = useParent();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -34,7 +36,14 @@ export default function ParentLogin() {
     try {
       const success = await signIn(username.trim(), password.trim());
       if (success) {
-        router.replace("/(parent)");
+        // Reset navigation stack so back button won't return to login
+        if (navRef.isReady()) {
+          navRef.dispatch(
+            CommonActions.reset({ index: 0, routes: [{ name: "index" }] })
+          );
+        } else {
+          router.replace("/(parent)");
+        }
       } else {
         Alert.alert("Login Failed", "Invalid username or password");
       }
@@ -58,7 +67,7 @@ export default function ParentLogin() {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={22} color={colors.primary} />
+          <Ionicons name="arrow-back" size={22} color={colors.accentLight} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
 
@@ -131,7 +140,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   backText: {
-    color: colors.primary,
+    color: colors.accentLight,
     fontSize: fontSize.base,
   },
   form: {

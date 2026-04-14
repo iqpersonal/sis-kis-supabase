@@ -178,10 +178,18 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Calculate total from items + 15% VAT
+      // Validate and calculate total from items + 15% VAT
+      for (const item of items) {
+        if (typeof item.price !== "number" || item.price < 0) {
+          return NextResponse.json(
+            { error: "Each item must have a valid non-negative price" },
+            { status: 400 }
+          );
+        }
+      }
       let subtotal = 0;
       const cleanItems = items.map((item: { book_id?: string; title?: string; price?: number }) => {
-        const price = typeof item.price === "number" ? item.price : 0;
+        const price = item.price as number;
         subtotal += price;
         return {
           book_id: item.book_id || "",

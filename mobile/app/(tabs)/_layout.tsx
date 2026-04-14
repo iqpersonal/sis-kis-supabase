@@ -1,12 +1,30 @@
-import { Tabs } from "expo-router";
-import { StyleSheet } from "react-native";
+import { useEffect } from "react";
+import { Tabs, Redirect } from "expo-router";
+import { StyleSheet, BackHandler, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useAuth, isStoreRole } from "@/context/auth-context";
 import { colors, fontSize } from "@/lib/theme";
 
 export default function TabLayout() {
+  // Prevent Android back button from navigating to login screen
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const handler = () => {
+      BackHandler.exitApp();
+      return true;
+    };
+    BackHandler.addEventListener("hardwareBackPress", handler);
+    return () => BackHandler.removeEventListener("hardwareBackPress", handler);
+  }, []);
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 12);
+  const { role } = useAuth();
+
+  // Store-only roles should never be in (tabs) — redirect to (store)
+  if (isStoreRole(role)) {
+    return <Redirect href="/(store)" />;
+  }
 
   return (
     <Tabs

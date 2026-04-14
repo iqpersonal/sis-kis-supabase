@@ -1,5 +1,4 @@
-// Dashboard API base URL for server-side quiz operations
-const API_BASE = "https://sis-kis.web.app/api";
+import { API_BASE } from "./api-config";
 
 export async function quizApi(endpoint: string, body: Record<string, any>) {
   const res = await fetch(`${API_BASE}/quiz/${endpoint}`, {

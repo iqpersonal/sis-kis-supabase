@@ -114,7 +114,7 @@ export default async function ReceiptViewerPage({
           {/* Header */}
           <div className="bg-[#296296] text-white px-6 py-5 text-center">
             <h1 className="text-xl font-bold tracking-wide">KIS Bookshop</h1>
-            <p className="text-blue-100 text-xs mt-1">Knowledge International School</p>
+            <p className="text-blue-100 text-xs mt-1">Khaled International Schools</p>
             <p className="text-blue-200 text-xs">Book Sales Receipt</p>
           </div>
 

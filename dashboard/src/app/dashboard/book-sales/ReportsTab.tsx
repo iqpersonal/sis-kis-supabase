@@ -114,7 +114,7 @@ export default function ReportsTab({ selectedYear }: ReportsTabProps) {
       if (data.summary) setSummary(data.summary);
       if (data.transactions) setTransactions(data.transactions);
       if (data.unpaid) setUnpaid(data.unpaid);
-      if (data.total_enrolled != null) {
+      if (data.total_enrolled !== null && data.total_enrolled !== undefined) {
         setUnpaidStats({ total_enrolled: data.total_enrolled, total_paid: data.total_paid, total_unpaid: data.total_unpaid });
       }
       if (data.catalog) setCatalog(data.catalog);

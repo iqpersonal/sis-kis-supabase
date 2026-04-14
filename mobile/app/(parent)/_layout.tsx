@@ -1,10 +1,21 @@
+import { useEffect } from "react";
 import { Tabs } from "expo-router";
-import { StyleSheet } from "react-native";
+import { StyleSheet, BackHandler, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, fontSize } from "@/lib/theme";
 
 export default function ParentTabLayout() {
+  // Prevent Android back button from navigating to login screen
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const handler = () => {
+      BackHandler.exitApp();
+      return true;
+    };
+    BackHandler.addEventListener("hardwareBackPress", handler);
+    return () => BackHandler.removeEventListener("hardwareBackPress", handler);
+  }, []);
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 12);
 
@@ -103,6 +114,15 @@ export default function ParentTabLayout() {
           title: "Messages",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="mail-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: "Alerts",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications-outline" size={size} color={color} />
           ),
         }}
       />

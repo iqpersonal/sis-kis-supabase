@@ -47,4 +47,7 @@ function ensureApp(): admin.app.App {
 const app = ensureApp();
 export const adminDb = app.firestore();
 export const adminAuth = app.auth();
+export const adminBucket = app.storage().bucket(
+  process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "sis-kis.firebasestorage.app"
+);
 export default admin;

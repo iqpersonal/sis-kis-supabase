@@ -11,14 +11,16 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useNavigationContainerRef } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAuth } from "@/context/auth-context";
 import { colors, spacing, fontSize, commonStyles } from "@/lib/theme";
+import { CommonActions } from "@react-navigation/native";
 
 export default function AdminLogin() {
   const router = useRouter();
+  const navRef = useNavigationContainerRef();
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,7 +35,14 @@ export default function AdminLogin() {
     setLoading(true);
     try {
       await signIn(email.trim(), password.trim());
-      router.replace("/(tabs)");
+      // Reset navigation stack so back button won't return to login
+      if (navRef.isReady()) {
+        navRef.dispatch(
+          CommonActions.reset({ index: 0, routes: [{ name: "index" }] })
+        );
+      } else {
+        router.replace("/");
+      }
     } catch {
       Alert.alert("Login Failed", "Invalid email or password");
     } finally {
@@ -54,7 +63,7 @@ export default function AdminLogin() {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={22} color={colors.primary} />
+          <Ionicons name="arrow-back" size={22} color={colors.accentLight} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
 
@@ -130,7 +139,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   backText: {
-    color: colors.primary,
+    color: colors.accentLight,
     fontSize: fontSize.base,
   },
   form: {

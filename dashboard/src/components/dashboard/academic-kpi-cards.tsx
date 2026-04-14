@@ -3,11 +3,10 @@
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Award, TrendingUp, CalendarOff, Clock } from "lucide-react";
 import { AnimatedCounter } from "@/components/dashboard/animated-counter";
+import { StaggerContainer, StaggerItem } from "@/components/motion";
 
 interface Props {
   totalExams: number;
@@ -32,6 +31,9 @@ export function AcademicKpiCards({
       description: "Student results this year",
       suffix: "",
       decimals: 0,
+      gradient: "from-primary/10 to-primary/5",
+      iconBg: "bg-primary/15",
+      iconColor: "text-primary",
     },
     {
       title: "Pass Rate",
@@ -40,6 +42,9 @@ export function AcademicKpiCards({
       description: passRate >= 90 ? "Excellent" : passRate >= 75 ? "Good" : "Needs attention",
       suffix: "%",
       decimals: 1,
+      gradient: "from-emerald-500/10 to-emerald-500/5",
+      iconBg: "bg-emerald-500/15",
+      iconColor: "text-emerald-600 dark:text-emerald-400",
     },
     {
       title: "Average Grade",
@@ -48,6 +53,9 @@ export function AcademicKpiCards({
       description: "Mean final average",
       suffix: "",
       decimals: 1,
+      gradient: "from-amber-500/10 to-amber-500/5",
+      iconBg: "bg-amber-500/15",
+      iconColor: "text-amber-600 dark:text-amber-400",
     },
     {
       title: "Absence Days",
@@ -56,27 +64,37 @@ export function AcademicKpiCards({
       description: `${totalTardy.toLocaleString()} tardy records`,
       suffix: "",
       decimals: 0,
+      gradient: "from-rose-500/10 to-rose-500/5",
+      iconBg: "bg-rose-500/15",
+      iconColor: "text-rose-600 dark:text-rose-400",
     },
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <StaggerContainer className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((c) => (
-        <Card key={c.title}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {c.title}
-            </CardTitle>
-            <c.icon className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              <AnimatedCounter value={c.value} suffix={c.suffix} decimals={c.decimals} />
-            </div>
-            <p className="text-xs text-muted-foreground">{c.description}</p>
-          </CardContent>
-        </Card>
+        <StaggerItem key={c.title}>
+          <Card className="relative overflow-hidden border-0 shadow-md hover:shadow-lg transition-shadow duration-300">
+            <div className={`absolute inset-0 bg-gradient-to-br ${c.gradient} pointer-events-none`} />
+            <CardContent className="relative p-5">
+              <div className="flex items-start justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {c.title}
+                  </p>
+                  <div className="text-3xl font-extrabold tracking-tight">
+                    <AnimatedCounter value={c.value} suffix={c.suffix} decimals={c.decimals} />
+                  </div>
+                  <p className="text-xs text-muted-foreground/80">{c.description}</p>
+                </div>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${c.iconBg}`}>
+                  <c.icon className={`h-5 w-5 ${c.iconColor}`} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </StaggerItem>
       ))}
-    </div>
+    </StaggerContainer>
   );
 }

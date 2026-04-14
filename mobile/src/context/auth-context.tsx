@@ -5,10 +5,30 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, limit } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 
-export type UserRole = "parent" | "teacher" | "admin";
+export type UserRole = "parent" | "teacher" | "admin" | "school_admin" | "store_clerk" | "it_manager" | "it_admin" | "super_admin" | "staff";
+
+export function getStoreAccess(role: UserRole | null): { general: boolean; it: boolean } {
+  switch (role) {
+    case "store_clerk": return { general: true, it: false };
+    case "it_manager": return { general: false, it: true };
+    case "it_admin": return { general: false, it: true };
+    case "super_admin":
+    case "school_admin":
+    case "admin": return { general: true, it: true };
+    default: return { general: false, it: false };
+  }
+}
+
+export function isStoreRole(role: UserRole | null): boolean {
+  return role === "store_clerk" || role === "it_manager" || role === "it_admin";
+}
+
+export function isStaffOnlyRole(role: UserRole | null): boolean {
+  return role === "staff";
+}
 
 interface AuthState {
   user: User | null;
@@ -35,16 +55,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        // Fetch role from Firestore
+        // Fetch role from Firestore (admin_users collection)
         try {
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          const userDoc = await getDoc(doc(db, "admin_users", firebaseUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
             setRole((data.role as UserRole) || "admin");
           } else {
-            setRole("admin");
+            // No admin_users doc → check if they exist in staff collection
+            const email = firebaseUser.email || "";
+            const staffQ = query(
+              collection(db, "staff"),
+              where("E_Mail", "==", email.toLowerCase()),
+              limit(1)
+            );
+            const staffSnap = await getDocs(staffQ);
+            if (!staffSnap.empty) {
+              setRole("staff");
+            } else {
+              setRole("admin");
+            }
           }
-        } catch {
+        } catch (err) {
+          console.warn("Failed to fetch user role:", err);
           setRole("admin");
         }
       } else {

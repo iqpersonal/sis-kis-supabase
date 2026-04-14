@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -14,9 +14,23 @@ interface TermGrades {
   average: number;
 }
 
+interface TermData {
+  label: string;
+  subjects: { subject: string; grade: number }[];
+  avg: number;
+}
+
+interface TermBreakdown {
+  year: string;
+  termCount: number;
+  terms: Record<string, TermData>;
+}
+
 export default function ParentGrades() {
   const { selectedChild } = useParent();
   const [terms, setTerms] = useState<TermGrades[]>([]);
+  const [termBreakdown, setTermBreakdown] = useState<TermBreakdown | null>(null);
+  const [showTermTable, setShowTermTable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasUnpaidFees, setHasUnpaidFees] = useState(false);
 
@@ -25,6 +39,8 @@ export default function ParentGrades() {
     const fetchGrades = async () => {
       setLoading(true);
       setHasUnpaidFees(false);
+      setTermBreakdown(null);
+      setShowTermTable(false);
       try {
         const snap = await getDoc(doc(db, "student_progress", selectedChild.studentNumber));
         if (!snap.exists()) { setTerms([]); return; }
@@ -74,6 +90,20 @@ export default function ParentGrades() {
         }
 
         setTerms(rows.slice(0, 10));
+
+        // Extract term-by-term breakdown for the most recent visible year
+        for (const yr of sortedYears) {
+          if (unpaidYears.has(yr)) continue;
+          const yd = years[yr];
+          if (yd.terms && Object.keys(yd.terms).length > 0) {
+            setTermBreakdown({
+              year: yr,
+              termCount: yd.term_count ?? 2,
+              terms: yd.terms,
+            });
+            break;
+          }
+        }
       } catch {
         setTerms([]);
       } finally {
@@ -174,6 +204,150 @@ export default function ParentGrades() {
               ))}
             </View>
           ))}
+
+          {/* Term-by-Term Breakdown Table */}
+          {termBreakdown && (() => {
+            const TERM_LABELS: Record<string, string> = {
+              t1_assess: "T1 Assess", t1_final: "T1 Final", sem1: "Sem 1",
+              t2_assess: "T2 Assess", t2_final: "T2 Final", sem2: "Sem 2",
+              t3_assess: "T3 Assess", t3_final: "T3 Final", sem3: "Sem 3",
+              annual: "Annual",
+            };
+            const allTermKeys = termBreakdown.termCount === 3
+              ? ["t1_assess", "t1_final", "sem1", "t2_assess", "t2_final", "sem2", "t3_assess", "t3_final", "sem3", "annual"]
+              : ["t1_assess", "t1_final", "sem1", "t2_assess", "t2_final", "sem2", "annual"];
+            const activeCols = allTermKeys.filter(k => termBreakdown.terms[k]);
+
+            // Collect all subjects
+            const allSubjects = new Set<string>();
+            for (const tk of activeCols) {
+              const t = termBreakdown.terms[tk];
+              if (t) t.subjects.forEach(s => allSubjects.add(s.subject));
+            }
+            const subjectList = Array.from(allSubjects).sort();
+
+            // Build lookup: termKey → subject → grade
+            const lookup: Record<string, Record<string, number>> = {};
+            for (const tk of activeCols) {
+              const t = termBreakdown.terms[tk];
+              if (t) {
+                lookup[tk] = {};
+                t.subjects.forEach(s => { lookup[tk][s.subject] = s.grade; });
+              }
+            }
+
+            const isSemOrAnnual = (k: string) => k.startsWith("sem") || k === "annual";
+
+            return (
+              <View style={styles.termBreakdownCard}>
+                <TouchableOpacity
+                  style={styles.termBreakdownToggle}
+                  onPress={() => setShowTermTable(!showTermTable)}
+                  activeOpacity={0.7}
+                >
+                  <View>
+                    <Text style={styles.termBreakdownTitle}>
+                      Term-by-Term Breakdown
+                    </Text>
+                    <Text style={styles.termBreakdownSub}>
+                      20{termBreakdown.year} · {termBreakdown.termCount === 3 ? "3-term" : "2-term"} · {subjectList.length} subjects
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>{showTermTable ? "▲" : "▼"}</Text>
+                </TouchableOpacity>
+
+                {showTermTable && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator>
+                    <View>
+                      {/* Header row */}
+                      <View style={styles.tableRow}>
+                        <View style={[styles.tableCell, styles.subjectCell, styles.headerCell]}>
+                          <Text style={styles.headerText}>Subject</Text>
+                        </View>
+                        {activeCols.map(tk => (
+                          <View
+                            key={tk}
+                            style={[
+                              styles.tableCell,
+                              styles.gradeCell,
+                              styles.headerCell,
+                              isSemOrAnnual(tk) && (tk === "annual" ? styles.annualHeader : styles.semHeader),
+                            ]}
+                          >
+                            <Text style={[
+                              styles.headerText,
+                              tk === "annual" && { color: "#1d4ed8" },
+                              tk.startsWith("sem") && { color: "#7e22ce" },
+                            ]}>
+                              {TERM_LABELS[tk] || tk}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {/* Subject rows */}
+                      {subjectList.map((subj, idx) => (
+                        <View key={subj} style={[styles.tableRow, idx % 2 === 1 && styles.altRow]}>
+                          <View style={[styles.tableCell, styles.subjectCell]}>
+                            <Text style={styles.tableCellSubjectText} numberOfLines={1}>{subj}</Text>
+                          </View>
+                          {activeCols.map(tk => {
+                            const g = lookup[tk]?.[subj];
+                            return (
+                              <View
+                                key={tk}
+                                style={[
+                                  styles.tableCell,
+                                  styles.gradeCell,
+                                  isSemOrAnnual(tk) && (tk === "annual" ? styles.annualCol : styles.semCol),
+                                ]}
+                              >
+                                {g != null ? (
+                                  <View style={[styles.gradePill, { backgroundColor: gradeColor(g) + "20", borderColor: gradeColor(g) + "40" }]}>
+                                    <Text style={[styles.gradePillText, { color: gradeColor(g) }]}>{g}</Text>
+                                  </View>
+                                ) : (
+                                  <Text style={styles.tableCellMuted}>—</Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      ))}
+
+                      {/* Average row */}
+                      <View style={[styles.tableRow, styles.avgRow]}>
+                        <View style={[styles.tableCell, styles.subjectCell]}>
+                          <Text style={[styles.tableCellSubjectText, { fontWeight: "700" }]}>Average</Text>
+                        </View>
+                        {activeCols.map(tk => {
+                          const t = termBreakdown.terms[tk];
+                          return (
+                            <View
+                              key={tk}
+                              style={[
+                                styles.tableCell,
+                                styles.gradeCell,
+                                isSemOrAnnual(tk) && (tk === "annual" ? styles.annualCol : styles.semCol),
+                              ]}
+                            >
+                              {t ? (
+                                <View style={[styles.gradePill, { backgroundColor: gradeColor(t.avg) + "20", borderColor: gradeColor(t.avg) + "40" }]}>
+                                  <Text style={[styles.gradePillText, { color: gradeColor(t.avg) }]}>{t.avg}</Text>
+                                </View>
+                              ) : (
+                                <Text style={styles.tableCellMuted}>—</Text>
+                              )}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </ScrollView>
+                )}
+              </View>
+            );
+          })()}
           </>
         )}
       </ScrollView>
@@ -248,5 +422,70 @@ const styles = StyleSheet.create({
   },
   subjectName: { flex: 1, fontSize: fontSize.sm, color: colors.text },
   subjectGrade: { fontSize: fontSize.sm, fontWeight: "600" },
+
+  // Term-by-term breakdown
+  termBreakdownCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary + "30",
+    marginBottom: spacing.md,
+    overflow: "hidden",
+  },
+  termBreakdownToggle: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: spacing.lg,
+  },
+  termBreakdownTitle: {
+    fontSize: fontSize.base,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  termBreakdownSub: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  chevron: { fontSize: 14, color: colors.textSecondary },
+  tableRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  altRow: { backgroundColor: colors.background },
+  headerCell: {
+    backgroundColor: "#f8fafc",
+    borderBottomWidth: 2,
+    borderBottomColor: colors.border,
+  },
+  tableCell: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  subjectCell: { width: 140, alignItems: "flex-start" },
+  gradeCell: { width: 72 },
+  headerText: { fontSize: fontSize.xs, fontWeight: "600", color: colors.textSecondary },
+  tableCellSubjectText: { fontSize: fontSize.xs, color: colors.text, fontWeight: "500" },
+  tableCellMuted: { fontSize: fontSize.xs, color: colors.textMuted },
+  gradePill: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  gradePillText: { fontSize: fontSize.xs, fontWeight: "700" },
+  semHeader: { backgroundColor: "#faf5ff" },
+  annualHeader: { backgroundColor: "#eff6ff" },
+  semCol: { backgroundColor: "#faf5ff50" },
+  annualCol: { backgroundColor: "#eff6ff50" },
+  avgRow: {
+    backgroundColor: "#f1f5f9",
+    borderTopWidth: 2,
+    borderTopColor: colors.border,
+  },
 });
 

@@ -88,7 +88,8 @@ export function TeacherAuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
 
       // Set cookie so middleware can detect session
-      document.cookie = `__teacher_session=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+      // NOTE: must be named "__session" — Firebase Hosting strips all other cookies
+      document.cookie = `__session=teacher; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
 
       setLoading(false);
       return true;
@@ -102,7 +103,7 @@ export function TeacherAuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     setTeacher(null);
     localStorage.removeItem(STORAGE_KEY);
-    document.cookie = "__teacher_session=; path=/; max-age=0";
+    document.cookie = "__session=; path=/; max-age=0";
   }, []);
 
   return (

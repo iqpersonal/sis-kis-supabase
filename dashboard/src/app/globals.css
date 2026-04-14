@@ -49,71 +49,71 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.985 0.002 260);
+  --foreground: oklch(0.145 0.015 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.145 0.015 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.145 0.015 260);
+  --primary: oklch(0.488 0.243 264.376);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.96 0.008 260);
+  --secondary-foreground: oklch(0.205 0.015 260);
+  --muted: oklch(0.96 0.008 260);
+  --muted-foreground: oklch(0.50 0.02 260);
+  --accent: oklch(0.94 0.02 264);
+  --accent-foreground: oklch(0.30 0.10 264);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(0.91 0.008 260);
+  --input: oklch(0.91 0.008 260);
+  --ring: oklch(0.488 0.243 264.376);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar: oklch(0.17 0.02 264);
+  --sidebar-foreground: oklch(0.92 0.01 260);
+  --sidebar-primary: oklch(0.70 0.19 264);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.24 0.04 264);
+  --sidebar-accent-foreground: oklch(0.92 0.01 260);
+  --sidebar-border: oklch(0.30 0.04 264);
+  --sidebar-ring: oklch(0.488 0.243 264.376);
+}
+
+.dark {
+  --background: oklch(0.13 0.015 264);
+  --foreground: oklch(0.94 0.01 260);
+  --card: oklch(0.18 0.02 264);
+  --card-foreground: oklch(0.94 0.01 260);
+  --popover: oklch(0.18 0.02 264);
+  --popover-foreground: oklch(0.94 0.01 260);
+  --primary: oklch(0.62 0.22 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.24 0.03 264);
+  --secondary-foreground: oklch(0.94 0.01 260);
+  --muted: oklch(0.24 0.03 264);
+  --muted-foreground: oklch(0.65 0.04 260);
+  --accent: oklch(0.28 0.05 264);
+  --accent-foreground: oklch(0.94 0.01 260);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.62 0.22 264);
+  --chart-1: oklch(0.62 0.22 264);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.13 0.02 264);
+  --sidebar-foreground: oklch(0.92 0.01 260);
+  --sidebar-primary: oklch(0.62 0.22 264);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.22 0.04 264);
+  --sidebar-accent-foreground: oklch(0.92 0.01 260);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.62 0.22 264);
 }
 
 @layer base {
@@ -122,5 +122,1005 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Smooth global transitions */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  *:focus-visible {
+    @apply ring-2 ring-ring ring-offset-2 ring-offset-background;
+    outline: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Professional Print Styles
+   ═══════════════════════════════════════════════════════════════ */
+@media print {
+  /* Reset colors for print */
+  :root {
+    --background: #fff !important;
+    --foreground: #000 !important;
+    --card: #fff !important;
+    --card-foreground: #000 !important;
+    --muted-foreground: #555 !important;
+    --border: #ccc !important;
+  }
+
+  /* General page setup */
+  @page {
+    size: A4 landscape;
+    margin: 12mm 10mm 12mm 10mm;
+  }
+
+  html, body {
+    font-size: 10pt !important;
+    color: #000 !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide sidebar, header, nav, and interactive controls */
+  aside,
+  nav,
+  header,
+  [data-sidebar],
+  [data-slot="sidebar"],
+  .no-print,
+  .print\\:hidden,
+  button:not(.print-keep),
+  input[type="date"],
+  [role="tablist"] {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Remove main layout sidebar gap */
+  main,
+  [data-slot="content"],
+  .flex-1 {
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Cards clean up */
+  [data-slot="card"],
+  .rounded-lg,
+  .rounded-xl {
+    border: 1px solid #ddd !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tables: tight, professional */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9pt !important;
+  }
+
+  th {
+    background: #f0f0f0 !important;
+    color: #000 !important;
+    font-weight: 700 !important;
+    border-bottom: 2px solid #333 !important;
+    padding: 6px 8px !important;
+    text-align: left !important;
+    white-space: nowrap;
+  }
+
+  td {
+    border-bottom: 1px solid #ddd !important;
+    padding: 5px 8px !important;
+    color: #000 !important;
+  }
+
+  tr:nth-child(even) {
+    background: #f8f8f8 !important;
+  }
+
+  /* KPI stat cards: inline row */
+  .grid {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* Badges print-friendly */
+  [data-slot="badge"],
+  .inline-flex.rounded-full,
+  .inline-flex.rounded-md {
+    border: 1px solid #999 !important;
+    background: transparent !important;
+    color: #000 !important;
+    font-size: 8pt !important;
+    padding: 1px 6px !important;
+  }
+
+  /* Bar chart visualizations in reports */
+  .bg-blue-500, .bg-red-500, .bg-emerald-500, .bg-red-500\/80 {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Print header styling */
+  .print-header {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid #1a365d;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
+
+  .print-header h1 {
+    font-size: 18pt !important;
+    font-weight: 700 !important;
+    color: #1a365d !important;
+    margin: 0 !important;
+  }
+
+  .print-header h2 {
+    font-size: 12pt !important;
+    font-weight: 600 !important;
+    color: #333 !important;
+    margin: 0 !important;
+  }
+
+  .print-header p {
+    font-size: 9pt !important;
+    color: #666 !important;
+    margin: 0 !important;
+  }
+
+  /* Section titles */
+  h1, h2, h3 {
+    page-break-after: avoid;
+    color: #1a365d !important;
+  }
+
+  /* Truncated text: show full */
+  .truncate {
+    overflow: visible !important;
+    text-overflow: unset !important;
+    white-space: normal !important;
+  }
+
+  /* Status color accents for print */
+  .text-yellow-600 { color: #b45309 !important; }
+  .text-red-600 { color: #dc2626 !important; }
+  .text-emerald-600, .text-green-600 { color: #059669 !important; }
+
+  /* Links: no underline in print */
+  a { text-decoration: none !important; color: #000 !important; }
+
+  /* Page break helpers */
+  .print-break-before { page-break-before: always !important; }
+  .print-break-avoid { page-break-inside: avoid !important; }
+
+  /* Footer on each page */
+  .print-footer {
+    display: block !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 7pt;
+    color: #999;
+    border-top: 1px solid #ddd;
+    padding-top: 4px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Store Proposal — Professional Document Styles
+   These apply BOTH on screen (inside .sp-doc) and in print.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Document container (screen: A4 preview) ── */
+.sp-doc {
+  max-width: 210mm;
+  margin: 0 auto 40px;
+  padding: 0 24px;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #1a1a2e;
+  font-size: 10pt;
+  line-height: 1.5;
+  page: store-proposal;
+}
+
+/* ── Cover / Document Header ── */
+.sp-cover {
+  margin-bottom: 28px;
+}
+.sp-cover-accent {
+  height: 6px;
+  background: linear-gradient(90deg, #1e3a5f, #2563eb, #7c3aed);
+  border-radius: 3px;
+  margin-bottom: 20px;
+}
+.sp-cover-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+.sp-cover-left {
+  flex: 1;
+}
+.sp-cover-title {
+  font-size: 20pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.sp-cover-subtitle {
+  font-size: 11pt;
+  font-weight: 500;
+  color: #4a5568;
+  margin-top: 4px;
+}
+.sp-cover-right {
+  text-align: right;
+  flex-shrink: 0;
+}
+.sp-cover-school {
+  font-size: 10pt;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+.sp-cover-date {
+  font-size: 9pt;
+  color: #718096;
+  margin-top: 2px;
+}
+.sp-cover-status {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 10px;
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: #059669;
+  border-radius: 3px;
+}
+.sp-cover-line {
+  height: 2px;
+  background: linear-gradient(90deg, #1e3a5f, #2563eb 40%, transparent 100%);
+  margin-top: 16px;
+}
+
+/* ── Section ── */
+.sp-section {
+  margin-bottom: 24px;
+  page-break-inside: avoid;
+}
+
+/* ── Section heading ── */
+.sp-h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14pt;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin: 0 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e2e8f0;
+}
+.sp-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 10pt;
+  font-weight: 800;
+  color: #fff;
+  background: #1e3a5f;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Paragraph ── */
+.sp-p {
+  color: #4a5568;
+  margin: 0 0 10px 0;
+  font-size: 10pt;
+}
+
+/* ── Tables ── */
+.sp-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin-bottom: 12px;
+}
+.sp-tbl thead tr {
+  background: #f1f5f9;
+}
+.sp-tbl th {
+  padding: 7px 10px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #1e3a5f;
+  border-bottom: 2px solid #cbd5e1;
+  white-space: nowrap;
+}
+.sp-tbl td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #2d3748;
+  vertical-align: top;
+}
+.sp-tbl tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+.sp-tbl-compact td,
+.sp-tbl-compact th {
+  padding: 4px 8px;
+}
+.sp-bold { font-weight: 600; }
+.sp-mono { font-family: 'Cascadia Code', 'Menlo', monospace; font-size: 8.5pt; }
+.sp-muted { color: #64748b; }
+.sp-center { text-align: center; }
+
+/* Total rows */
+.sp-total {
+  background: #eff6ff !important;
+  font-weight: 700;
+}
+.sp-total td { border-bottom: 2px solid #3b82f6; }
+.sp-total-green {
+  background: #ecfdf5 !important;
+}
+.sp-total-green td { border-bottom: 2px solid #10b981; }
+
+/* ── Access badges ── */
+.sp-yes {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #16a34a;
+  font-weight: 700;
+  font-size: 10pt;
+}
+.sp-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 10pt;
+}
+
+/* ── KPI grid ── */
+.sp-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sp-kpi {
+  text-align: center;
+  padding: 10px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.sp-kpi-val {
+  font-size: 20pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  line-height: 1;
+}
+.sp-kpi-label {
+  font-size: 8pt;
+  font-weight: 600;
+  color: #334155;
+  margin-top: 4px;
+}
+.sp-kpi-sub {
+  font-size: 7pt;
+  color: #94a3b8;
+}
+
+/* ── Info boxes ── */
+.sp-box {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+.sp-box-blue { background: #eff6ff; border-color: #bfdbfe; }
+.sp-box-purple { background: #faf5ff; border-color: #e9d5ff; }
+.sp-box-title {
+  font-size: 9pt;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 8px;
+}
+
+/* Check grid */
+.sp-check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px 16px;
+  font-size: 8.5pt;
+  color: #334155;
+}
+.sp-check-item::before { content: none; }
+
+/* ── Two columns ── */
+.sp-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* ── KV pairs ── */
+.sp-kv {
+  font-size: 8.5pt;
+  margin-bottom: 4px;
+  color: #4a5568;
+}
+.sp-kv-k { font-weight: 600; color: #1a1a2e; }
+.sp-kv-v { color: #64748b; }
+
+/* ── Tags ── */
+.sp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.sp-tag {
+  font-size: 7pt;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: #eef2ff;
+  color: #4338ca;
+  white-space: nowrap;
+}
+
+/* ── Feature grid ── */
+.sp-feat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.sp-feat {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  border-left: 3px solid #2563eb;
+}
+.sp-feat-title {
+  font-size: 9pt;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 2px;
+}
+.sp-feat-desc {
+  font-size: 8.5pt;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* ── Workflow flow ── */
+.sp-flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.sp-flow-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sp-flow-badge {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 8.5pt;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sp-fb-blue { background: #dbeafe; color: #1e40af; }
+.sp-fb-yellow { background: #fef3c7; color: #92400e; }
+.sp-fb-orange { background: #ffedd5; color: #9a3412; }
+.sp-fb-green { background: #dcfce7; color: #166534; }
+.sp-flow-arrow {
+  font-size: 12pt;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+/* ── Spec grid ── */
+.sp-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.sp-spec-k {
+  font-size: 8pt;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 1px;
+}
+.sp-spec-v {
+  font-size: 8.5pt;
+  color: #4a5568;
+}
+
+/* ── Highlight box ── */
+.sp-highlight {
+  text-align: center;
+  padding: 14px 20px;
+  margin-top: 12px;
+  border: 2px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+.sp-highlight-label {
+  font-size: 8pt;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.sp-highlight-val {
+  font-size: 18pt;
+  font-weight: 800;
+  color: #1e40af;
+  margin: 4px 0;
+}
+.sp-highlight-note {
+  font-size: 7.5pt;
+  color: #94a3b8;
+}
+
+/* ── Pricing row ── */
+.sp-price-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sp-price-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+  text-align: center;
+  position: relative;
+}
+.sp-price-featured {
+  border: 2px solid #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
+}
+.sp-price-rec {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2563eb;
+  color: #fff;
+  font-size: 6.5pt;
+  font-weight: 700;
+  padding: 1px 10px;
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+}
+.sp-price-opt {
+  font-size: 7pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6366f1;
+  margin-bottom: 4px;
+}
+.sp-price-name {
+  font-size: 11pt;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+.sp-price-desc {
+  font-size: 8pt;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+.sp-price-amount {
+  font-size: 12pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  margin-bottom: 2px;
+}
+.sp-price-per {
+  font-size: 7.5pt;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+.sp-price-list {
+  text-align: left;
+  font-size: 8pt;
+  color: #334155;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ── Summary box ── */
+.sp-summary {
+  background: #1e293b;
+  color: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.sp-summary-title {
+  font-size: 14pt;
+  font-weight: 800;
+  margin-bottom: 16px;
+  color: #fff;
+}
+.sp-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.sp-summary-stat {
+  text-align: center;
+}
+.sp-summary-label {
+  font-size: 8pt;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.sp-summary-val {
+  font-size: 13pt;
+  font-weight: 800;
+  color: #fff;
+}
+.sp-summary-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 14px;
+  border-top: 1px solid #334155;
+}
+.sp-summary-check {
+  font-size: 8.5pt;
+  color: #cbd5e1;
+}
+
+/* ── Document footer ── */
+.sp-doc-footer {
+  margin-top: 20px;
+}
+.sp-doc-footer-line {
+  height: 2px;
+  background: linear-gradient(90deg, #1e3a5f, #2563eb 40%, transparent 100%);
+  margin-bottom: 8px;
+}
+.sp-doc-footer-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 7.5pt;
+  color: #94a3b8;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Store Proposal — Print-specific overrides
+   ═══════════════════════════════════════════════════════════════ */
+@media print {
+  /* Override page to portrait for the proposal document */
+  @page store-proposal {
+    size: A4 portrait;
+    margin: 14mm 12mm;
+  }
+
+  /* Show the document, hide everything else on the page */
+  #store-proposal-doc {
+    display: block !important;
+  }
+
+  /* ── CRITICAL: Undo generic print overrides inside .sp-doc ── */
+  .sp-doc {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 9.5pt !important;
+    color: #000 !important;
+  }
+
+  /* Prevent generic table styles from overriding .sp-tbl */
+  .sp-tbl th {
+    background: #f1f5f9 !important;
+    color: #1e3a5f !important;
+    font-weight: 700 !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+    padding: 7px 10px !important;
+    text-align: left !important;
+    font-size: 8pt !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+    white-space: nowrap !important;
+  }
+  .sp-tbl td {
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 6px 10px !important;
+    color: #2d3748 !important;
+  }
+
+  /* Prevent generic .grid override from breaking sp grids */
+  .sp-kpi-grid {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 10px !important;
+  }
+  .sp-feat-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+  .sp-check-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 3px 16px !important;
+  }
+  .sp-spec-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+  .sp-cols {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 16px !important;
+  }
+  .sp-price-row {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 12px !important;
+  }
+  .sp-summary-stats {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 16px !important;
+  }
+  .sp-summary-checks {
+    display: flex !important;
+    flex-wrap: wrap !important;
+  }
+  .sp-tags {
+    display: flex !important;
+    flex-wrap: wrap !important;
+  }
+  .sp-flow {
+    display: flex !important;
+    flex-wrap: wrap !important;
+  }
+
+  /* Prevent generic rounded/card override from adding dashed border to sp elements */
+  .sp-doc .sp-kpi,
+  .sp-doc .sp-box,
+  .sp-doc .sp-feat,
+  .sp-doc .sp-price-card,
+  .sp-doc .sp-summary {
+    box-shadow: none !important;
+  }
+
+  /* Links inside sp-doc: keep colored */
+  .sp-doc a { color: inherit !important; }
+
+  /* Section headings: override generic h2 color */
+  .sp-h2 {
+    color: #1e3a5f !important;
+    page-break-after: avoid !important;
+  }
+
+  /* ── Financial page break ── */
+  .sp-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  /* ── Hide EVERYTHING except .sp-doc when printing proposal ── */
+  body:has(#store-proposal-doc) aside,
+  body:has(#store-proposal-doc) header,
+  body:has(#store-proposal-doc) nav,
+  body:has(#store-proposal-doc) .no-print,
+  body:has(#store-proposal-doc) [data-sidebar],
+  body:has(#store-proposal-doc) [data-slot="sidebar"],
+  body:has(#store-proposal-doc) footer:not(.sp-doc-footer) {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body:has(#store-proposal-doc) main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  body:has(#store-proposal-doc) .flex-1.bg-muted\/30 {
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  /* Cover */
+  .sp-cover-accent {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Section page break control */
+  .sp-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Tables */
+  .sp-tbl thead tr {
+    background: #f1f5f9 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-tbl tbody tr:nth-child(even) {
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-total {
+    background: #eff6ff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-total-green {
+    background: #ecfdf5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* KPIs */
+  .sp-kpi {
+    background: #f8fafc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Feature cards */
+  .sp-feat {
+    border-left-color: #2563eb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Flow badges */
+  .sp-fb-blue, .sp-fb-yellow, .sp-fb-orange, .sp-fb-green {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Tags */
+  .sp-tag {
+    background: #eef2ff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Access badges */
+  .sp-yes {
+    background: #dcfce7 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Highlight */
+  .sp-highlight {
+    background: #eff6ff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Pricing */
+  .sp-price-featured {
+    border-color: #2563eb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-price-rec {
+    background: #2563eb !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-cover-status {
+    background: #059669 !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Summary dark bg */
+  .sp-summary {
+    background: #1e293b !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-summary-val, .sp-summary-title {
+    color: #fff !important;
+  }
+  .sp-summary-label {
+    color: #94a3b8 !important;
+  }
+  .sp-summary-checks {
+    border-top-color: #334155 !important;
+  }
+  .sp-summary-check {
+    color: #cbd5e1 !important;
+  }
+
+  /* Boxes */
+  .sp-box-blue {
+    background: #eff6ff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sp-box-purple {
+    background: #faf5ff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Number badge */
+  .sp-num {
+    background: #1e3a5f !important;
+    color: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Gradient bars */
+  .sp-cover-accent, .sp-cover-line, .sp-doc-footer-line {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

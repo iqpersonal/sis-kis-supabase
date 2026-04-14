@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useTeacherAuth } from "@/context/teacher-auth-context";
 import { useLanguage } from "@/context/language-context";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -15,7 +14,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BookOpen, Home } from "lucide-react";
+import { BookOpen } from "lucide-react";
+import { LoginLayout } from "@/components/login-layout";
 
 export default function TeacherLoginPage() {
   const { signIn } = useTeacherAuth();
@@ -47,22 +47,17 @@ export default function TeacherLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
-      <div className="absolute top-4 left-4">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-          <Home className="h-4 w-4" />
-          Home
-        </Link>
-      </div>
-      <div className="absolute top-4 right-4">
-        <LanguageSwitcher variant="icon" />
-      </div>
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
-            <BookOpen className="h-6 w-6" />
+    <LoginLayout
+      portalLabel="Teacher Portal"
+      portalDescription="Manage your classes, track student progress, assign quizzes, and submit attendance — all from one place."
+      topRight={<LanguageSwitcher variant="icon" />}
+    >
+      <Card className="border-0 shadow-xl">
+        <CardHeader className="text-center pb-4">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/25">
+            <BookOpen className="h-7 w-7" />
           </div>
-          <CardTitle className="text-2xl">{t("teacherPortal")}</CardTitle>
+          <CardTitle className="text-2xl font-bold">{t("teacherPortal")}</CardTitle>
           <CardDescription>
             {t("teacherSignInDesc")}
           </CardDescription>
@@ -70,7 +65,7 @@ export default function TeacherLoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -86,6 +81,7 @@ export default function TeacherLoginPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
 
@@ -100,12 +96,13 @@ export default function TeacherLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
 
             <Button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700"
+              className="w-full h-11 font-semibold bg-blue-600 hover:bg-blue-700"
               disabled={loading}
             >
               {loading ? t("signingIn") : t("signIn")}
@@ -117,6 +114,6 @@ export default function TeacherLoginPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </LoginLayout>
   );
 }

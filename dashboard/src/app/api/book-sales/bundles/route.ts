@@ -69,15 +69,18 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Auto-calculate total_price from book prices
+      // Auto-calculate total_price from book prices (batched for >30 books)
       let totalPrice = 0;
       if (Array.isArray(book_ids) && book_ids.length > 0) {
-        const bookSnap = await adminDb.collection("book_catalog")
-          .where(FieldPath.documentId(), "in", book_ids.slice(0, 30)) // Firestore "in" limit = 30
-          .get();
-        for (const doc of bookSnap.docs) {
-          const d = doc.data();
-          if (typeof d.price === "number") totalPrice += d.price;
+        for (let i = 0; i < book_ids.length; i += 30) {
+          const batch = book_ids.slice(i, i + 30);
+          const bookSnap = await adminDb.collection("book_catalog")
+            .where(FieldPath.documentId(), "in", batch)
+            .get();
+          for (const doc of bookSnap.docs) {
+            const d = doc.data();
+            if (typeof d.price === "number") totalPrice += d.price;
+          }
         }
       }
 
@@ -112,15 +115,18 @@ export async function POST(req: NextRequest) {
         if (fields[key] !== undefined) updates[key] = fields[key];
       }
 
-      // Recalculate total if book_ids changed
+      // Recalculate total if book_ids changed (batched for >30 books)
       if (Array.isArray(fields.book_ids) && fields.book_ids.length > 0 && fields.total_price === undefined) {
         let totalPrice = 0;
-        const bookSnap = await adminDb.collection("book_catalog")
-          .where(FieldPath.documentId(), "in", fields.book_ids.slice(0, 30))
-          .get();
-        for (const doc of bookSnap.docs) {
-          const d = doc.data();
-          if (typeof d.price === "number") totalPrice += d.price;
+        for (let i = 0; i < fields.book_ids.length; i += 30) {
+          const batch = fields.book_ids.slice(i, i + 30);
+          const bookSnap = await adminDb.collection("book_catalog")
+            .where(FieldPath.documentId(), "in", batch)
+            .get();
+          for (const doc of bookSnap.docs) {
+            const d = doc.data();
+            if (typeof d.price === "number") totalPrice += d.price;
+          }
         }
         updates.total_price = totalPrice;
       }

@@ -15,12 +15,22 @@ import { TermFinancialCards } from "@/components/dashboard/term-financial-cards"
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SyncStatusBanner } from "@/components/dashboard/sync-status-banner";
+import { StoreDashboard } from "@/components/dashboard/store-dashboard";
+import { DashboardReportsHub } from "@/components/dashboard/dashboard-reports-hub";
+import { PageTransition } from "@/components/motion";
+
+const STORE_CLERK_SECTIONS = [
+  { label: "General Store", apiBase: "/api/general-store", href: "/dashboard/general-store" },
+];
+const IT_ADMIN_SECTIONS = [
+  { label: "IT Store", apiBase: "/api/it-store", href: "/dashboard/it-store" },
+];
 
 export default function DashboardOverview() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
   const { t } = useLanguage();
-  const { can, loading: authLoading } = useAuth();
+  const { can, role, loading: authLoading } = useAuth();
 
   // Single Firestore read — pre-aggregated summary document
   const { summary, loading: loadSummary } = useSummary(selectedYear);
@@ -70,6 +80,14 @@ export default function DashboardOverview() {
     );
   }
 
+  // Store / IT roles: show inventory-only dashboard
+  if (role === "store_clerk") {
+    return <StoreDashboard sections={STORE_CLERK_SECTIONS} />;
+  }
+  if (role === "it_admin") {
+    return <StoreDashboard sections={IT_ADMIN_SECTIONS} />;
+  }
+
   if (!summary) {
     return (
       <div className="flex h-64 items-center justify-center text-muted-foreground">
@@ -89,10 +107,10 @@ export default function DashboardOverview() {
   );
 
   return (
-    <div className="space-y-8">
+    <PageTransition className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">{t("dashboard")}</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-3xl font-extrabold tracking-tight">{t("dashboard")}</h1>
+        <p className="text-sm text-muted-foreground">
           Khaled International Schools — {selectedLabel}
           {schoolFilter !== "all" && ` — ${schoolLabel}`}
         </p>
@@ -121,6 +139,9 @@ export default function DashboardOverview() {
       {hasFinancials && can("fees.view") && (
         <FinancialChart data={schoolData.financials.chart} />
       )}
-    </div>
+
+      {/* Quick Reports hub */}
+      <DashboardReportsHub />
+    </PageTransition>
   );
 }

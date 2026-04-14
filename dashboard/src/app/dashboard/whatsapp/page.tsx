@@ -13,6 +13,8 @@ import {
   Clock,
   AlertCircle,
   Check,
+  ClipboardEdit,
+  FileDown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,6 +52,13 @@ interface WhatsAppMessage {
 
 type Audience = "all" | "school" | "class" | "family";
 type Mode = "template" | "text";
+type Recipient = "father" | "mother" | "both";
+
+const RECIPIENTS: { value: Recipient; label: string }[] = [
+  { value: "father", label: "Father Only" },
+  { value: "mother", label: "Mother Only" },
+  { value: "both", label: "Both Parents" },
+];
 
 const AUDIENCES: { value: Audience; label: string; icon: React.ElementType }[] = [
   { value: "all", label: "All Parents", icon: Users },
@@ -75,6 +84,7 @@ export default function WhatsAppPage() {
   const [school, setSchool] = useState("");
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [familyNumber, setFamilyNumber] = useState("");
+  const [recipient, setRecipient] = useState<Recipient>("father");
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{
     success: boolean;
@@ -98,6 +108,25 @@ export default function WhatsAppPage() {
 
   // API config status
   const [apiConfigured, setApiConfigured] = useState<boolean | null>(null);
+
+  // Contact Update state
+  const [cuAudience, setCuAudience] = useState<"all" | "school" | "class" | "family">("all");
+  const [cuSchool, setCuSchool] = useState("");
+  const [cuTargets, setCuTargets] = useState<string[]>([]);
+  const [cuFamilyNumber, setCuFamilyNumber] = useState("");
+  const [cuRecipient, setCuRecipient] = useState<Recipient>("father");
+  const [cuFamilyInfo, setCuFamilyInfo] = useState<{
+    family_number: string; father_name?: string; family_name?: string;
+    father_phone?: string; mother_phone?: string; father_email?: string; mother_email?: string;
+    children?: { child_name: string; current_class: string; current_section?: string }[];
+  } | null>(null);
+  const [cuFamilyLoading, setCuFamilyLoading] = useState(false);
+  const [cuSending, setCuSending] = useState(false);
+  const [cuResult, setCuResult] = useState<{
+    success: boolean; total_families: number; sent: number; failed: number; configured?: boolean; errors?: { phone: string; error: string }[];
+  } | null>(null);
+  const [cuLog, setCuLog] = useState<{ id: string; family_number: string; changed_fields: string[]; submitted_at: string }[]>([]);
+  const [cuLogLoading, setCuLogLoading] = useState(false);
 
   /* ─── Check API configuration ─── */
   useEffect(() => {
@@ -270,6 +299,7 @@ export default function WhatsAppPage() {
       audienceFilter.targets = targets;
     }
     if (audience === "family") audienceFilter.family_number = familyNumber;
+    audienceFilter.recipient = recipient;
 
     // Build template components (body params)
     let components: unknown[] | undefined;
@@ -317,6 +347,7 @@ export default function WhatsAppPage() {
         setSchool("");
         setSelectedTargets([]);
         setFamilyNumber("");
+        setRecipient("father");
         loadHistory();
       } else {
         setSendResult({
@@ -365,6 +396,79 @@ export default function WhatsAppPage() {
     (audience !== "school" || school) &&
     (audience !== "family" || familyNumber.trim());
 
+  /* ─── Contact Update: Family lookup ─── */
+  useEffect(() => {
+    const fn = cuFamilyNumber.trim();
+    if (!fn || cuAudience !== "family") { setCuFamilyInfo(null); return; }
+    setCuFamilyLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const snap = await getDocs(query(collection(getDb(), "families"), where("family_number", "==", fn), limit(1)));
+        if (snap.empty) { setCuFamilyInfo(null); } else {
+          const d = snap.docs[0].data();
+          setCuFamilyInfo({
+            family_number: d.family_number,
+            father_name: d.father_name || "",
+            family_name: d.family_name || "",
+            father_phone: d.father_phone || "",
+            mother_phone: d.mother_phone || "",
+            father_email: d.father_email || "",
+            mother_email: d.mother_email || "",
+            children: d.children || [],
+          });
+        }
+      } catch { setCuFamilyInfo(null); }
+      finally { setCuFamilyLoading(false); }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [cuFamilyNumber, cuAudience]);
+
+  /* ─── Contact Update: Send ─── */
+  const handleContactUpdateSend = useCallback(async () => {
+    if (!user?.email) return;
+    setCuSending(true);
+    setCuResult(null);
+    try {
+      const filter: Record<string, unknown> = {};
+      if (cuAudience === "school" && cuSchool) filter.school = cuSchool;
+      if (cuAudience === "class" && cuSchool) {
+        filter.school = cuSchool;
+        filter.targets = cuTargets.map((t) => {
+          const [cls, sec] = t.split("-");
+          return sec ? { class: cls, section: sec } : { class: cls };
+        });
+      }
+      if (cuAudience === "family") filter.family_number = cuFamilyNumber.trim();
+      filter.recipient = cuRecipient;
+      const res = await fetch("/api/contact-update/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audience: cuAudience, audience_filter: filter, sender: user.email }),
+      });
+      const data = await res.json();
+      setCuResult(res.ok ? data : { success: false, total_families: 0, sent: 0, failed: 0 });
+    } catch {
+      setCuResult({ success: false, total_families: 0, sent: 0, failed: 0 });
+    } finally {
+      setCuSending(false);
+    }
+  }, [user, cuAudience, cuSchool, cuTargets, cuFamilyNumber, cuRecipient]);
+
+  /* ─── Contact Update: Load recent submissions ─── */
+  const loadContactUpdateLog = useCallback(async () => {
+    setCuLogLoading(true);
+    try {
+      const snap = await getDocs(
+        query(collection(getDb(), "contact_updates"), orderBy("submitted_at", "desc"), limit(50))
+      );
+      setCuLog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as { id: string; family_number: string; changed_fields: string[]; submitted_at: string })));
+    } catch (err) {
+      console.error("Failed to load contact update log:", err);
+    } finally {
+      setCuLogLoading(false);
+    }
+  }, []);
+
   return (
     <div className="space-y-8">
       {/* Page header */}
@@ -387,10 +491,10 @@ export default function WhatsAppPage() {
               WhatsApp API not configured yet
             </p>
             <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">
-              The dashboard is ready. Once you provide the WhatsApp Business API credentials, add
-              <code className="mx-1 px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900 rounded text-[11px]">WHATSAPP_ACCESS_TOKEN</code>
+              The dashboard is ready. Once you provide the Gupshup API credentials, add
+              <code className="mx-1 px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900 rounded text-[11px]">GUPSHUP_API_KEY</code>
               and
-              <code className="mx-1 px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900 rounded text-[11px]">WHATSAPP_PHONE_NUMBER_ID</code>
+              <code className="mx-1 px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900 rounded text-[11px]">GUPSHUP_SOURCE_PHONE</code>
               to <code className="mx-1 px-1 py-0.5 bg-yellow-100 dark:bg-yellow-900 rounded text-[11px]">.env.local</code> and restart the server.
               Until then, messages will be recorded in history but not delivered.
             </p>
@@ -445,7 +549,7 @@ export default function WhatsAppPage() {
                   onChange={(e) => setTemplateName(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Use the exact template name as approved in your Meta Business account.
+                  Use the exact template name as approved in your Gupshup/Meta Business account.
                 </p>
               </div>
 
@@ -650,6 +754,26 @@ export default function WhatsAppPage() {
             </div>
           )}
 
+          {/* Recipient selector */}
+          <div>
+            <label className="text-sm font-medium mb-2 block">Recipient Phone</label>
+            <div className="flex gap-2">
+              {RECIPIENTS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setRecipient(value)}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    recipient === value
+                      ? "border-green-600 bg-green-600/10 text-green-700"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Separator />
 
           {/* Send button + result */}
@@ -696,6 +820,164 @@ export default function WhatsAppPage() {
                   </>
                 )}
               </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Contact Update Request ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ClipboardEdit className="h-5 w-5 text-blue-600" />
+            Contact Update Request
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Send parents a WhatsApp link to update their contact information (phone, email, address, etc.)
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Audience picker */}
+          <div>
+            <label className="text-sm font-medium mb-2 block">Audience</label>
+            <div className="flex gap-2 flex-wrap">
+              {(["all", "school", "class", "family"] as const).map((a) => (
+                <Button key={a} size="sm" variant={cuAudience === a ? "default" : "outline"} onClick={() => { setCuAudience(a); setCuResult(null); }}>
+                  {a === "all" ? "All Parents" : a === "school" ? "By School" : a === "class" ? "By Class" : "Specific Family"}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {cuAudience === "family" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Family Number</label>
+                <input
+                  type="text"
+                  value={cuFamilyNumber}
+                  onChange={(e) => setCuFamilyNumber(e.target.value)}
+                  placeholder="e.g. 12345"
+                  className="border rounded-md px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              {cuFamilyLoading && <p className="text-xs text-muted-foreground">Looking up family...</p>}
+              {!cuFamilyLoading && cuFamilyNumber.trim() && !cuFamilyInfo && (
+                <p className="text-xs text-red-600">Family not found</p>
+              )}
+              {cuFamilyInfo && (
+                <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1.5">
+                  <div className="font-medium">{cuFamilyInfo.father_name} {cuFamilyInfo.family_name}</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {cuFamilyInfo.father_phone && <span>Father Phone: {cuFamilyInfo.father_phone}</span>}
+                    {cuFamilyInfo.mother_phone && <span>Mother Phone: {cuFamilyInfo.mother_phone}</span>}
+                    {cuFamilyInfo.father_email && <span>Father Email: {cuFamilyInfo.father_email}</span>}
+                    {cuFamilyInfo.mother_email && <span>Mother Email: {cuFamilyInfo.mother_email}</span>}
+                  </div>
+                  {cuFamilyInfo.children && cuFamilyInfo.children.length > 0 && (
+                    <div className="pt-1">
+                      <span className="text-xs font-medium">Children:</span>
+                      <ul className="text-xs text-muted-foreground ml-3 list-disc">
+                        {cuFamilyInfo.children.map((c, i) => (
+                          <li key={i}>{c.child_name} — {classNameMap[c.current_class] || c.current_class}{c.current_section ? ` / ${c.current_section}` : ""}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {(cuAudience === "school" || cuAudience === "class") && (
+            <div>
+              <label className="text-sm font-medium mb-1 block">School</label>
+              <div className="flex gap-2">
+                <Button size="sm" variant={cuSchool === "0021-01" ? "default" : "outline"} onClick={() => { setCuSchool("0021-01"); setCuTargets([]); }}>Boys</Button>
+                <Button size="sm" variant={cuSchool === "0021-02" ? "default" : "outline"} onClick={() => { setCuSchool("0021-02"); setCuTargets([]); }}>Girls</Button>
+              </div>
+            </div>
+          )}
+
+          {cuAudience === "class" && cuSchool && classSections.length > 0 && (
+            <div>
+              <label className="text-sm font-medium mb-1 block">Classes</label>
+              <div className="flex flex-wrap gap-1.5 max-h-[180px] overflow-y-auto">
+                {classSections
+                  .filter((cs) => !EXCLUDED_CLASS_CODES.has(cs.classCode))
+                  .map((cs) => {
+                    const key = cs.sectionCode ? `${cs.classCode}-${cs.sectionCode}` : cs.classCode;
+                    const selected = cuTargets.includes(key);
+                    return (
+                      <Button key={key} size="sm" variant={selected ? "default" : "outline"} className="text-xs h-7"
+                        onClick={() => setCuTargets((prev) => selected ? prev.filter((t) => t !== key) : [...prev, key])}>
+                        {classNameMap[cs.classCode] || cs.classCode}{cs.sectionCode ? ` - ${cs.sectionName}` : ""}
+                        {selected && <Check className="h-3 w-3 ml-1" />}
+                      </Button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {/* Recipient selector */}
+          <div>
+            <label className="text-sm font-medium mb-2 block">Send To Phone</label>
+            <div className="flex gap-2">
+              {RECIPIENTS.map(({ value, label }) => (
+                <Button key={value} size="sm" variant={cuRecipient === value ? "default" : "outline"} onClick={() => setCuRecipient(value)}>
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Send button */}
+          <Button onClick={handleContactUpdateSend} disabled={cuSending || (cuAudience === "family" && !cuFamilyNumber.trim()) || (cuAudience !== "all" && cuAudience !== "family" && !cuSchool) || (cuAudience === "class" && cuTargets.length === 0)} className="gap-2">
+            {cuSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {cuSending ? "Sending..." : "Send Contact Update Request"}
+          </Button>
+
+          {/* Result */}
+          {cuResult && (
+            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${cuResult.success ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300" : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"}`}>
+              {cuResult.success ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              {cuResult.success
+                ? cuResult.failed > 0
+                  ? `Sent to ${cuResult.sent} phone(s) across ${cuResult.total_families} families (${cuResult.failed} failed${cuResult.errors?.[0]?.error ? `: ${cuResult.errors[0].error}` : ""})`
+                  : `Sent to ${cuResult.sent} phone(s) across ${cuResult.total_families} families`
+                : "Failed to send. Check console for details."}
+              {cuResult.success && !cuResult.configured && (
+                <span className="text-xs ml-2">(API not configured — recorded only)</span>
+              )}
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Recent submissions log */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold">Recent Contact Updates</h4>
+              <Button size="sm" variant="ghost" onClick={loadContactUpdateLog} disabled={cuLogLoading} className="gap-1 text-xs">
+                {cuLogLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                Load Log
+              </Button>
+            </div>
+            {cuLog.length > 0 ? (
+              <div className="space-y-1.5 max-h-[240px] overflow-y-auto">
+                {cuLog.map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between gap-2 text-xs p-2 bg-muted/50 rounded">
+                    <span className="font-mono">{entry.family_number}</span>
+                    <span className="text-muted-foreground">{entry.changed_fields?.length || 0} field(s) changed</span>
+                    <span className="text-muted-foreground">{entry.submitted_at?.slice(0, 16).replace("T", " ")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-4">
+                {cuLogLoading ? "Loading..." : "Click \"Load Log\" to see recent submissions"}
+              </p>
             )}
           </div>
         </CardContent>

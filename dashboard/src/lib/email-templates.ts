@@ -2,7 +2,7 @@
 
 const KIS_BLUE = "#1a365d";
 const KIS_GOLD = "#c9a84c";
-const LOGO_URL = "https://sis-kis.web.app/KIS-Logo.png";
+const LOGO_URL = "https://sis-kis.web.app/kis-logo.png";
 const DASHBOARD_URL = "https://sis-kis.web.app";
 
 function baseLayout(body: string) {
@@ -17,7 +17,7 @@ function baseLayout(body: string) {
     <tr><td style="background:${KIS_BLUE};padding:24px 32px;text-align:center;">
       <img src="${LOGO_URL}" alt="KIS Logo" width="80" style="display:inline-block;vertical-align:middle;">
       <span style="display:inline-block;vertical-align:middle;margin-left:16px;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:.5px;">
-        Knowledge International School
+        Khaled International Schools
       </span>
     </td></tr>
     <!-- Gold accent line -->
@@ -28,7 +28,7 @@ function baseLayout(body: string) {
     </td></tr>
     <!-- Footer -->
     <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;font-size:12px;color:#6b7280;">
-      Knowledge International School &middot; Riyadh, Saudi Arabia<br>
+      Khaled International Schools &middot; Riyadh, Saudi Arabia<br>
       <a href="${DASHBOARD_URL}" style="color:${KIS_BLUE};text-decoration:none;">sis-kis.web.app</a>
     </td></tr>
   </table>
@@ -53,7 +53,7 @@ export function teacherWelcomeEmail(data: WelcomeEmailData) {
   const html = baseLayout(`
     <h2 style="margin:0 0 16px;color:${KIS_BLUE};font-size:20px;">Welcome, ${data.displayName}!</h2>
     <p style="margin:0 0 12px;color:#374151;font-size:15px;line-height:1.6;">
-      An account has been created for you on the <strong>Knowledge International School</strong> Student Information System.
+      An account has been created for you on the <strong>Khaled International Schools</strong> Student Information System.
     </p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0;width:100%;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
       <tr><td style="padding:10px 16px;background:#f9fafb;font-size:13px;color:#6b7280;width:100px;">Email</td>
@@ -95,7 +95,7 @@ export function bulkWelcomeEmail(data: BulkWelcomeData) {
   const html = baseLayout(`
     <h2 style="margin:0 0 16px;color:${KIS_BLUE};font-size:20px;">Welcome, ${data.displayName}!</h2>
     <p style="margin:0 0 12px;color:#374151;font-size:15px;line-height:1.6;">
-      An account has been created for you on the <strong>Knowledge International School</strong> Student Information System.
+      An account has been created for you on the <strong>Khaled International Schools</strong> Student Information System.
     </p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0;width:100%;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
       <tr><td style="padding:10px 16px;background:#f9fafb;font-size:13px;color:#6b7280;width:100px;">Email</td>

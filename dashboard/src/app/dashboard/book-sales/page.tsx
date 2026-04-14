@@ -184,6 +184,8 @@ export default function BookSalesPage() {
         fetch(`/api/book-sales/catalog?year=${selectedYear || ""}`),
         fetch(`/api/book-sales/bundles?year=${selectedYear || ""}`),
       ]);
+      if (!bRes.ok) throw new Error(`Catalog API: ${bRes.status}`);
+      if (!buRes.ok) throw new Error(`Bundles API: ${buRes.status}`);
       const bData = await bRes.json();
       const buData = await buRes.json();
       setBooks(bData.books || []);
@@ -204,6 +206,8 @@ export default function BookSalesPage() {
         fetch(`/api/book-sales/transactions?action=list&${params}`),
         fetch(`/api/book-sales/transactions?action=stats&year=${selectedYear || ""}`),
       ]);
+      if (!salesRes.ok) throw new Error(`Sales API: ${salesRes.status}`);
+      if (!statsRes.ok) throw new Error(`Stats API: ${statsRes.status}`);
       const salesData = await salesRes.json();
       const statsData = await statsRes.json();
       setSales(salesData.sales || []);
@@ -358,12 +362,12 @@ export default function BookSalesPage() {
           student_number: selectedStudent.student_number,
           student_name: selectedStudent.student_name,
           family_number: selectedStudent.family_number,
-          family_name: "",
+          family_name: selectedStudent.family_number || "",
           grade: selectedStudent.grade,
           school: selectedStudent.school,
           items: checkedItems.map((c) => ({ book_id: c.book_id, title: c.title, price: c.price })),
           payment_method: paymentMethod,
-          sold_by: "",
+          sold_by: "POS",
           year: selectedYear || "",
         }),
       });
@@ -516,8 +520,8 @@ export default function BookSalesPage() {
   const exportCSV = useCallback(() => {
     const headers = ["Receipt #", "Date", "Student", "Student #", "Family #", "Grade", "School", "Items", "Subtotal", "VAT", "Total", "Paid", "Method", "Status"];
     const rows = sales.map((s) => {
-      const sub = s.subtotal ?? (s.total_amount / 1.15);
-      const vat = s.vat_amount ?? (s.total_amount - sub);
+      const sub = typeof s.subtotal === "number" ? s.subtotal : 0;
+      const vat = typeof s.vat_amount === "number" ? s.vat_amount : 0;
       return [
         s.receipt_number,
         formatDate(s.created_at),
@@ -526,7 +530,7 @@ export default function BookSalesPage() {
         s.family_number,
         s.grade,
         s.school,
-        s.items.map((i) => i.title).join("; "),
+        (s.items || []).map((i) => i.title).join("; "),
         sub.toFixed(2),
         vat.toFixed(2),
         s.total_amount,

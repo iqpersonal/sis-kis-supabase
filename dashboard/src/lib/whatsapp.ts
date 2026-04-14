@@ -1,20 +1,21 @@
 /**
- * WhatsApp Business Cloud API — helper functions.
+ * WhatsApp via Gupshup API — helper functions.
  * Used by server-side API routes only.
  *
- * ⚠️  TO ACTIVATE: Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID
+ * ⚠️  TO ACTIVATE: Set GUPSHUP_API_KEY and GUPSHUP_SOURCE_PHONE
  *     in your .env.local file. Until then, messages will be recorded in
  *     Firestore but NOT actually delivered via WhatsApp.
  */
 
-const GRAPH_API = "https://graph.facebook.com/v21.0";
+const GUPSHUP_API = "https://api.gupshup.io/wa/api/v1";
 
-/** Returns config if WhatsApp API credentials are set, null otherwise. */
-function getConfig(): { token: string; phoneNumberId: string } | null {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN;
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!token || !phoneNumberId) return null;
-  return { token, phoneNumberId };
+/** Returns config if Gupshup API credentials are set, null otherwise. */
+function getConfig(): { apiKey: string; sourcePhone: string; appName: string } | null {
+  const apiKey = process.env.GUPSHUP_API_KEY;
+  const sourcePhone = process.env.GUPSHUP_SOURCE_PHONE;
+  const appName = process.env.GUPSHUP_APP_NAME || "kisapp";
+  if (!apiKey || !sourcePhone) return null;
+  return { apiKey, sourcePhone, appName };
 }
 
 /** True when the API env vars are filled in. */
@@ -47,16 +48,6 @@ export interface WhatsAppApiResponse {
   messages: { id: string }[];
 }
 
-export interface WhatsAppApiError {
-  error: {
-    message: string;
-    type: string;
-    code: number;
-    error_subcode?: number;
-    fbtrace_id: string;
-  };
-}
-
 /* ─── Public helpers ─── */
 
 /**
@@ -67,35 +58,66 @@ export async function sendTemplate(
 ): Promise<WhatsAppApiResponse> {
   const config = getConfig();
   if (!config) {
-    // API not configured yet — return a stub so history still records
     return { messaging_product: "whatsapp", contacts: [{ input: params.to, wa_id: params.to }], messages: [{ id: "not-configured" }] };
   }
-  const { token, phoneNumberId } = config;
+  const { apiKey, sourcePhone, appName } = config;
   const { to, templateName, languageCode = "ar", components } = params;
+  const dest = normalizePhone(to).replace("+", "");
 
-  const body: Record<string, unknown> = {
-    messaging_product: "whatsapp",
-    to: normalizePhone(to),
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: languageCode },
-      ...(components?.length ? { components } : {}),
-    },
+  // Extract template parameters from components
+  const templateParams: string[] = [];
+  if (components?.length) {
+    for (const comp of components) {
+      for (const param of comp.parameters || []) {
+        if (param.text) templateParams.push(param.text);
+      }
+    }
+  }
+
+  const templateObj: Record<string, unknown> = {
+    id: templateName,
+    params: templateParams,
   };
 
-  const res = await fetch(`${GRAPH_API}/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const formBody = new URLSearchParams({
+    source: sourcePhone,
+    destination: dest,
+    template: JSON.stringify(templateObj),
+    "src.name": appName,
   });
 
+  // 10-second timeout to prevent hanging if Gupshup API is slow
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${GUPSHUP_API}/template/msg`, {
+      method: "POST",
+      headers: {
+        apikey: apiKey,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formBody.toString(),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
   const data = await res.json();
-  if (!res.ok) throw new WhatsAppError(data as WhatsAppApiError, res.status);
-  return data as WhatsAppApiResponse;
+  if (!res.ok || data.status === "error") {
+    throw new WhatsAppError(
+      data.message || data.reason || JSON.stringify(data),
+      res.status
+    );
+  }
+
+  return {
+    messaging_product: "whatsapp",
+    contacts: [{ input: to, wa_id: dest }],
+    messages: [{ id: data.messageId || data.id || "sent" }],
+  };
 }
 
 /**
@@ -106,36 +128,59 @@ export async function sendText(
 ): Promise<WhatsAppApiResponse> {
   const config = getConfig();
   if (!config) {
-    // API not configured yet — return a stub so history still records
     return { messaging_product: "whatsapp", contacts: [{ input: params.to, wa_id: params.to }], messages: [{ id: "not-configured" }] };
   }
-  const { token, phoneNumberId } = config;
+  const { apiKey, sourcePhone, appName } = config;
   const { to, text } = params;
+  const dest = normalizePhone(to).replace("+", "");
 
-  const body = {
-    messaging_product: "whatsapp",
-    to: normalizePhone(to),
-    type: "text",
-    text: { preview_url: false, body: text },
-  };
+  const message = JSON.stringify({ type: "text", text });
 
-  const res = await fetch(`${GRAPH_API}/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const formBody = new URLSearchParams({
+    channel: "whatsapp",
+    source: sourcePhone,
+    destination: dest,
+    message,
+    "src.name": appName,
   });
 
+  // 10-second timeout to prevent hanging if Gupshup API is slow
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${GUPSHUP_API}/msg`, {
+      method: "POST",
+      headers: {
+        apikey: apiKey,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formBody.toString(),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
   const data = await res.json();
-  if (!res.ok) throw new WhatsAppError(data as WhatsAppApiError, res.status);
-  return data as WhatsAppApiResponse;
+  if (!res.ok || data.status === "error") {
+    throw new WhatsAppError(
+      data.message || data.reason || JSON.stringify(data),
+      res.status
+    );
+  }
+
+  return {
+    messaging_product: "whatsapp",
+    contacts: [{ input: to, wa_id: dest }],
+    messages: [{ id: data.messageId || data.id || "sent" }],
+  };
 }
 
 /* ─── Utilities ─── */
 
-/** Strip spaces/dashes and prepend + if missing. */
+/** Strip spaces/dashes, normalize Saudi numbers, return digits only (no +). */
 export function normalizePhone(phone: string): string {
   let cleaned = phone.replace(/[\s\-()]/g, "");
   if (!cleaned.startsWith("+")) cleaned = "+" + cleaned;
@@ -149,16 +194,10 @@ export function normalizePhone(phone: string): string {
 /** Custom error class for WhatsApp API failures. */
 export class WhatsAppError extends Error {
   status: number;
-  code: number;
-  subcode?: number;
-  fbtraceId: string;
 
-  constructor(data: WhatsAppApiError, status: number) {
-    super(data.error.message);
+  constructor(message: string, status: number) {
+    super(message);
     this.name = "WhatsAppError";
     this.status = status;
-    this.code = data.error.code;
-    this.subcode = data.error.error_subcode;
-    this.fbtraceId = data.error.fbtrace_id;
   }
 }

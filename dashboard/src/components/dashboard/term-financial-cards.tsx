@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DollarSign, TrendingUp, TrendingDown } from "lucide-react";
+import { StaggerContainer, StaggerItem } from "@/components/motion";
 
 export interface TermFinancials {
   term: number; // 1, 2, 3 or 0 = "Other"
@@ -30,14 +31,17 @@ function TermCard({ data }: { data: TermFinancials }) {
       ? ((data.totalPaid / data.totalCharges) * 100).toFixed(1)
       : "0";
   const isFullyPaid = data.outstandingBalance === 0 && data.totalCharges > 0;
+  const rateNum = parseFloat(rate);
 
   return (
-    <Card>
+    <Card className="border-0 shadow-md bg-gradient-to-br from-emerald-500/10 via-background to-teal-500/5 hover:shadow-lg transition-shadow">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {data.label}
         </CardTitle>
-        <DollarSign className="h-4 w-4 text-muted-foreground" />
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15">
+          <DollarSign className="h-4 w-4 text-emerald-600" />
+        </div>
       </CardHeader>
       <CardContent className="space-y-2">
         {/* Charges */}
@@ -77,15 +81,15 @@ function TermCard({ data }: { data: TermFinancials }) {
           </span>
         </div>
         {/* Collection rate */}
-        <div className="pt-1 border-t">
+        <div className="pt-2 border-t">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Collection</span>
-            <span className="text-xs font-medium">{rate}%</span>
+            <span className={`text-xs font-semibold ${rateNum >= 80 ? "text-green-600" : rateNum >= 50 ? "text-amber-600" : "text-red-600"}`}>{rate}%</span>
           </div>
-          <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
+          <div className="mt-1.5 h-2 w-full rounded-full bg-muted/60">
             <div
-              className="h-1.5 rounded-full bg-green-500 transition-all"
-              style={{ width: `${Math.min(parseFloat(rate), 100)}%` }}
+              className={`h-2 rounded-full transition-all ${rateNum >= 80 ? "bg-green-500" : rateNum >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+              style={{ width: `${Math.min(rateNum, 100)}%` }}
             />
           </div>
         </div>
@@ -116,7 +120,7 @@ export function TermFinancialCards({ termData }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Financial Summary by Installment</h2>
+        <h2 className="text-lg font-bold">Financial Summary by Installment</h2>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>
             Total: <strong className="text-foreground">{formatSAR(grand.totalCharges)}</strong>
@@ -130,7 +134,7 @@ export function TermFinancialCards({ termData }: Props) {
           <span>{grandRate}% collected</span>
         </div>
       </div>
-      <div
+      <StaggerContainer
         className={`grid gap-4 ${
           activeterms.length <= 3
             ? "sm:grid-cols-2 lg:grid-cols-3"
@@ -138,9 +142,11 @@ export function TermFinancialCards({ termData }: Props) {
         }`}
       >
         {activeterms.map((t) => (
-          <TermCard key={t.term} data={t} />
+          <StaggerItem key={t.term}>
+            <TermCard data={t} />
+          </StaggerItem>
         ))}
-      </div>
+      </StaggerContainer>
     </div>
   );
 }

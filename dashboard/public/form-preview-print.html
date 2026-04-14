@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<title>Khaled International Schools — Contact Update Form (Sample)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1e293b; background: linear-gradient(135deg, #f0f4ff 0%, #e8f5e9 100%); min-height: 100vh; }
+  .container { max-width: 560px; margin: 0 auto; padding: 24px 16px; }
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 1px 8px rgba(0,0,0,.06); padding: 20px 20px 16px; margin-bottom: 16px; }
+  .header { text-align: center; margin-bottom: 24px; }
+  .header img { height: 72px; margin-bottom: 8px; }
+  .header h2 { font-size: 18px; font-weight: 700; color: #1a365d; margin-bottom: 4px; }
+  .header h1 { font-size: 20px; font-weight: 700; color: #1e293b; }
+  .section-title { margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #f1f5f9; }
+  .section-title h3 { font-size: 16px; font-weight: 700; color: #1e293b; margin: 0; }
+  .student-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 8px; }
+  .student-icon { font-size: 20px; }
+  .student-name { font-weight: 600; font-size: 14px; color: #1e293b; }
+  .student-class { font-size: 12px; color: #64748b; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; font-weight: 500; color: #475569; margin-bottom: 4px; }
+  .field-value { width: 100%; padding: 10px 12px; font-size: 15px; border: 1.5px solid #e2e8f0; border-radius: 10px; background: #fafbfc; color: #334155; min-height: 40px; display: flex; align-items: center; }
+  .submit-btn { width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 700; color: #fff; background: #2563eb; border: none; border-radius: 12px; text-align: center; margin-bottom: 24px; }
+  .lang-toggle { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 14px; font-size: 13px; font-weight: 600; color: #3b82f6; }
+  .sample-badge { background: #dc2626; color: #fff; text-align: center; padding: 8px; font-size: 14px; font-weight: 700; border-radius: 8px; margin-bottom: 16px; letter-spacing: 1px; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: linear-gradient(135deg, #f0f4ff 0%, #e8f5e9 100%); }
+    .no-print { display: none !important; }
+  }
+  .print-btn { display: block; margin: 16px auto; padding: 10px 32px; font-size: 14px; font-weight: 600; color: #fff; background: #2563eb; border: none; border-radius: 8px; cursor: pointer; }
+  .print-btn:hover { background: #1d4ed8; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Language Toggle -->
+  <div style="text-align: right; margin-bottom: 8px;">
+    <span class="lang-toggle">العربية</span>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <img src="kis-logo.png" alt="KIS" onerror="this.style.display='none'" />
+    <h2>Khaled International Schools</h2>
+    <h1>Update Contact Information</h1>
+  </div>
+
+  <!-- Students -->
+  <div class="card">
+    <div class="section-title"><h3>Students</h3></div>
+    <div class="student-row">
+      <span class="student-icon">🎓</span>
+      <div>
+        <div class="student-name">Ahmed Mohammed Al-Abdullah</div>
+        <div class="student-class">Grade 5 — Section A</div>
+      </div>
+    </div>
+    <div class="student-row">
+      <span class="student-icon">🎓</span>
+      <div>
+        <div class="student-name">Sara Mohammed Al-Abdullah</div>
+        <div class="student-class">Grade 3 — Section B</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Father -->
+  <div class="card">
+    <div class="section-title"><h3>Father Information</h3></div>
+    <div class="field">
+      <label>Mobile</label>
+      <div class="field-value" dir="ltr">0501234567</div>
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <div class="field-value" dir="ltr">mohammed.abdullah@email.com</div>
+    </div>
+    <div class="field">
+      <label>Workplace</label>
+      <div class="field-value">Saudi Aramco</div>
+    </div>
+  </div>
+
+  <!-- Mother -->
+  <div class="card">
+    <div class="section-title"><h3>Mother Information</h3></div>
+    <div class="field">
+      <label>Mobile</label>
+      <div class="field-value" dir="ltr">0559876543</div>
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <div class="field-value" dir="ltr">fatima.khan@email.com</div>
+    </div>
+    <div class="field">
+      <label>Workplace</label>
+      <div class="field-value">Ministry of Education</div>
+    </div>
+  </div>
+
+  <!-- Address -->
+  <div class="card">
+    <div class="section-title"><h3>Address</h3></div>
+    <div class="field">
+      <label>City</label>
+      <div class="field-value">Dhahran</div>
+    </div>
+    <div class="field">
+      <label>District</label>
+      <div class="field-value">Al Doha</div>
+    </div>
+    <div class="field">
+      <label>Street</label>
+      <div class="field-value">King Fahd Road, Building 12</div>
+    </div>
+  </div>
+
+  <!-- Emergency -->
+  <div class="card">
+    <div class="section-title"><h3>Emergency Contact</h3></div>
+    <div class="field">
+      <label>Contact Name</label>
+      <div class="field-value">Khaled Al-Abdullah</div>
+    </div>
+    <div class="field">
+      <label>Emergency Phone</label>
+      <div class="field-value" dir="ltr">0551112233</div>
+    </div>
+  </div>
+
+  <!-- Submit Button -->
+  <div class="submit-btn">Save Updates</div>
+
+</div>
+
+</body>
+</html>

@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
 import {
@@ -11,7 +13,13 @@ import {
   type SchoolFilter,
 } from "@/context/school-filter-context";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   BarChart3,
   LayoutDashboard,
@@ -31,6 +39,7 @@ import {
   TrendingUp,
   Trophy,
   AlertTriangle,
+  ClipboardEdit,
   ClipboardList,
   UserSearch,
   Settings,
@@ -47,102 +56,340 @@ import {
   Contact,
   ShoppingCart,
   HelpCircle,
+  Package,
+  Cpu,
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
+  Menu,
+  Search,
+  Megaphone,
+  Headphones,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { NotificationBell } from "@/components/dashboard/notification-bell";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { useLanguage } from "@/context/language-context";
 import type { TranslationKeys } from "@/lib/i18n/translations";
-import { ROUTE_PERMISSIONS, ROLES, type Permission } from "@/lib/rbac";
+import { ROLES, type Permission } from "@/lib/rbac";
+import { motion, AnimatePresence } from "framer-motion";
 
-const NAV: { href: string; labelKey: TranslationKeys; icon: React.ElementType; permission: Permission }[] = [
-  { href: "/dashboard", labelKey: "navOverview", icon: LayoutDashboard, permission: "dashboard.view" },
-  { href: "/dashboard/reports", labelKey: "navStudents", icon: Users, permission: "students.view" },
-  { href: "/dashboard/students", labelKey: "navStudentProfile", icon: User, permission: "students.profile" },
-  { href: "/dashboard/academics", labelKey: "navAcademics", icon: GraduationCap, permission: "academics.view" },
-  { href: "/dashboard/subjects", labelKey: "navSubjectPerformance", icon: BookOpen, permission: "subjects.view" },
-  { href: "/dashboard/assessments", labelKey: "navAssessments", icon: ClipboardList, permission: "assessments.view" },
-  { href: "/dashboard/progress", labelKey: "navStudentProgress", icon: UserSearch, permission: "progress.view" },
-  { href: "/dashboard/terms", labelKey: "navTermProgress", icon: CalendarRange, permission: "terms.view" },
-  { href: "/dashboard/subject-trends", labelKey: "navSubjectTrends", icon: TrendingUp, permission: "subject_trends.view" },
-  { href: "/dashboard/honor-roll", labelKey: "navHonorRoll", icon: Trophy, permission: "honor_roll.view" },
-  { href: "/dashboard/at-risk", labelKey: "navAtRisk", icon: AlertTriangle, permission: "at_risk.view" },
-  { href: "/dashboard/attendance", labelKey: "navAttendance", icon: CalendarOff, permission: "attendance.view" },
-  { href: "/dashboard/delinquency", labelKey: "navDelinquency", icon: DollarSign, permission: "delinquency.view" },
-  { href: "/dashboard/documents", labelKey: "navDocumentExpiry", icon: FileText, permission: "documents.view" },
-  { href: "/dashboard/notifications", labelKey: "navNotifications", icon: BellRing, permission: "notifications.view" },
-  { href: "/dashboard/messages", labelKey: "navMessages" as TranslationKeys, icon: MessageSquare, permission: "notifications.view" },
-  { href: "/dashboard/whatsapp", labelKey: "navWhatsApp" as TranslationKeys, icon: Phone, permission: "notifications.view" },
-  { href: "/dashboard/fees", labelKey: "navFees", icon: Wallet, permission: "fees.view" },
-  { href: "/dashboard/progress-report", labelKey: "navProgressReport" as TranslationKeys, icon: ClipboardList, permission: "progress.view" as Permission },
-  { href: "/dashboard/library", labelKey: "navLibrary" as TranslationKeys, icon: BookOpen, permission: "library.view" as Permission },
-  { href: "/dashboard/quizzes", labelKey: "navQuizzes" as TranslationKeys, icon: HelpCircle, permission: "quizzes.view" as Permission },
-  { href: "/dashboard/transfers", labelKey: "navTransfers", icon: ArrowRightLeft, permission: "transfers.view" },
-  { href: "/dashboard/bulk-export", labelKey: "navBulkExport", icon: Printer, permission: "bulk_export.view" },
-  { href: "/dashboard/pdf-reports", labelKey: "navPdfReports" as TranslationKeys, icon: FileText, permission: "bulk_export.view" },
-  { href: "/dashboard/analytics", labelKey: "navAnalytics", icon: PieChart, permission: "analytics.view" },
-  { href: "/dashboard/compare", labelKey: "navYearComparison", icon: GitCompareArrows, permission: "year_comparison.view" },
-  { href: "/dashboard/ai-insights", labelKey: "navAiInsights" as TranslationKeys, icon: Sparkles, permission: "ai_insights.view" as Permission },
-  { href: "/dashboard/transcript-settings", labelKey: "navTranscriptSettings", icon: Settings, permission: "transcript_settings.view" },
-  { href: "/dashboard/upload", labelKey: "navUpload", icon: Upload, permission: "upload.view" },
-  { href: "/dashboard/diplomas", labelKey: "navDiplomas" as TranslationKeys, icon: GraduationCap, permission: "certificates.print" as Permission },
-  { href: "/dashboard/admin/users", labelKey: "navUserManagement" as TranslationKeys, icon: Users, permission: "admin.users" },
-  { href: "/dashboard/admin/class-assignment", labelKey: "navClassAssignment" as TranslationKeys, icon: BookOpen, permission: "admin.users" },
-  { href: "/dashboard/audit-log", labelKey: "navAuditLog" as TranslationKeys, icon: Shield, permission: "admin.audit_log" as Permission },
-  { href: "/dashboard/staff", labelKey: "navStaffDirectory" as TranslationKeys, icon: Contact, permission: "staff.view" as Permission },
-  { href: "/dashboard/it-inventory", labelKey: "navITInventory" as TranslationKeys, icon: Laptop, permission: "inventory.view" as Permission },
-  { href: "/dashboard/book-sales", labelKey: "navBookSales" as TranslationKeys, icon: ShoppingCart, permission: "book_sales.view" as Permission },
+/* ── Grouped Navigation ─────────────────────────────────── */
+
+interface NavItem {
+  href: string;
+  labelKey: TranslationKeys;
+  icon: React.ElementType;
+  permission: Permission;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Main",
+    items: [
+      { href: "/dashboard", labelKey: "navOverview", icon: LayoutDashboard, permission: "dashboard.view" },
+    ],
+  },
+  {
+    label: "Students",
+    items: [
+      { href: "/dashboard/reports", labelKey: "navStudents", icon: Users, permission: "students.view" },
+      { href: "/dashboard/students", labelKey: "navStudentProfile", icon: User, permission: "students.profile" },
+      { href: "/dashboard/progress", labelKey: "navStudentProgress", icon: UserSearch, permission: "progress.view" },
+      { href: "/dashboard/honor-roll", labelKey: "navHonorRoll", icon: Trophy, permission: "honor_roll.view" },
+      { href: "/dashboard/at-risk", labelKey: "navAtRisk", icon: AlertTriangle, permission: "at_risk.view" },
+    ],
+  },
+  {
+    label: "Academics",
+    items: [
+      { href: "/dashboard/academics", labelKey: "navAcademics", icon: GraduationCap, permission: "academics.view" },
+      { href: "/dashboard/subjects", labelKey: "navSubjectPerformance", icon: BookOpen, permission: "subjects.view" },
+      { href: "/dashboard/assessments", labelKey: "navAssessments", icon: ClipboardList, permission: "assessments.view" },
+      { href: "/dashboard/terms", labelKey: "navTermProgress", icon: CalendarRange, permission: "terms.view" },
+      { href: "/dashboard/subject-trends", labelKey: "navSubjectTrends", icon: TrendingUp, permission: "subject_trends.view" },
+      { href: "/dashboard/quizzes", labelKey: "navQuizzes" as TranslationKeys, icon: HelpCircle, permission: "quizzes.view" as Permission },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { href: "/dashboard/attendance", labelKey: "navAttendance", icon: CalendarOff, permission: "attendance.view" },
+      { href: "/dashboard/documents", labelKey: "navDocumentExpiry", icon: FileText, permission: "documents.view" },
+      { href: "/dashboard/transfers", labelKey: "navTransfers", icon: ArrowRightLeft, permission: "transfers.view" },
+      { href: "/dashboard/library", labelKey: "navLibrary" as TranslationKeys, icon: BookOpen, permission: "library.view" as Permission },
+      { href: "/dashboard/general-store", labelKey: "navGeneralStore" as TranslationKeys, icon: Package, permission: "general_store.view" as Permission },
+      { href: "/dashboard/it-store", labelKey: "navITStore" as TranslationKeys, icon: Cpu, permission: "it_store.view" as Permission },
+      { href: "/dashboard/it-tickets", labelKey: "navITTickets" as TranslationKeys, icon: Headphones, permission: "tickets.manage" as Permission },
+    ],
+  },
+  {
+    label: "Finance",
+    items: [
+      { href: "/dashboard/fees", labelKey: "navFees", icon: Wallet, permission: "fees.view" },
+      { href: "/dashboard/delinquency", labelKey: "navDelinquency", icon: DollarSign, permission: "delinquency.view" },
+      { href: "/dashboard/book-sales", labelKey: "navBookSales" as TranslationKeys, icon: ShoppingCart, permission: "book_sales.view" as Permission },
+    ],
+  },
+  {
+    label: "Communication",
+    items: [
+      { href: "/dashboard/notifications", labelKey: "navNotifications", icon: BellRing, permission: "notifications.view" },
+      { href: "/dashboard/messages", labelKey: "navMessages" as TranslationKeys, icon: MessageSquare, permission: "notifications.view" },
+      { href: "/dashboard/whatsapp", labelKey: "navWhatsApp" as TranslationKeys, icon: Phone, permission: "notifications.view" },
+      { href: "/dashboard/contact-updates", labelKey: "navContactUpdates" as TranslationKeys, icon: ClipboardEdit, permission: "notifications.view" },
+      { href: "/dashboard/announcements", labelKey: "navAnnouncements" as TranslationKeys, icon: Megaphone, permission: "announcements.manage" as Permission },
+    ],
+  },
+  {
+    label: "Reports",
+    items: [
+      { href: "/dashboard/progress-report", labelKey: "navProgressReport" as TranslationKeys, icon: ClipboardList, permission: "progress.view" as Permission },
+      { href: "/dashboard/bulk-export", labelKey: "navBulkExport", icon: Printer, permission: "bulk_export.view" },
+      { href: "/dashboard/pdf-reports", labelKey: "navPdfReports" as TranslationKeys, icon: FileText, permission: "bulk_export.view" },
+      { href: "/dashboard/store-reports", labelKey: "navStoreReports" as TranslationKeys, icon: BarChart3, permission: "store_reports.view" as Permission },
+      { href: "/dashboard/analytics", labelKey: "navAnalytics", icon: PieChart, permission: "analytics.view" },
+      { href: "/dashboard/compare", labelKey: "navYearComparison", icon: GitCompareArrows, permission: "year_comparison.view" },
+      { href: "/dashboard/ai-insights", labelKey: "navAiInsights" as TranslationKeys, icon: Sparkles, permission: "ai_insights.view" as Permission },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { href: "/dashboard/transcript-settings", labelKey: "navTranscriptSettings", icon: Settings, permission: "transcript_settings.view" },
+      { href: "/dashboard/upload", labelKey: "navUpload", icon: Upload, permission: "upload.view" },
+      { href: "/dashboard/diplomas", labelKey: "navDiplomas" as TranslationKeys, icon: GraduationCap, permission: "certificates.print" as Permission },
+      { href: "/dashboard/admin/users", labelKey: "navUserManagement" as TranslationKeys, icon: Users, permission: "admin.users" },
+      { href: "/dashboard/admin/class-assignment", labelKey: "navClassAssignment" as TranslationKeys, icon: BookOpen, permission: "admin.users" },
+      { href: "/dashboard/audit-log", labelKey: "navAuditLog" as TranslationKeys, icon: Shield, permission: "admin.audit_log" as Permission },
+      { href: "/dashboard/staff", labelKey: "navStaffDirectory" as TranslationKeys, icon: Contact, permission: "staff.view" as Permission },
+      { href: "/dashboard/it-inventory", labelKey: "navITInventory" as TranslationKeys, icon: Laptop, permission: "inventory.view" as Permission },
+      { href: "/dashboard/store-proposal", labelKey: "navStoreProposal" as TranslationKeys, icon: FileText, permission: "admin.users" as Permission },
+    ],
+  },
 ];
 
-export default function DashboardLayout({
-  children,
+/* ── Collapsible Nav Group ──────────────────────────────── */
+
+function NavGroupSection({
+  label,
+  items,
+  pathname,
+  t,
+  collapsed,
+  onToggle,
+  onNavigate,
+  mini,
 }: {
-  children: React.ReactNode;
+  label: string;
+  items: NavItem[];
+  pathname: string;
+  t: (k: TranslationKeys) => string;
+  collapsed: boolean;
+  onToggle: () => void;
+  onNavigate?: () => void;
+  mini?: boolean;
 }) {
-  const pathname = usePathname();
-  const { user, role, signOut, can } = useAuth();
-  const router = useRouter();
-  const { years, selectedYear, selectedLabel, setSelectedYear, loading: yearsLoading } =
-    useAcademicYear();
-  const { schoolFilter, setSchoolFilter, locked: schoolLocked } = useSchoolFilter();
-  const { t, isRTL: rtl } = useLanguage();
+  const hasActive = items.some(({ href }) =>
+    href === "/dashboard"
+      ? pathname === "/dashboard"
+      : pathname.startsWith(href)
+  );
 
-  // Filter nav items by user's permissions
-  const filteredNav = NAV.filter(({ permission }) => can(permission));
+  /* ── Mini mode: just show icons with tooltips, no group headers ── */
+  if (mini) {
+    return (
+      <div className="mb-2 flex flex-col items-center gap-0.5">
+        {items.map(({ href, labelKey, icon: Icon }) => {
+          const active =
+            href === "/dashboard"
+              ? pathname === "/dashboard"
+              : pathname.startsWith(href);
+          return (
+            <Tooltip key={href}>
+              <TooltipTrigger asChild>
+                <Link
+                  href={href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150",
+                    active
+                      ? "bg-sidebar-primary/20 text-sidebar-primary shadow-sm"
+                      : "text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">
+                {t(labelKey)}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    );
+  }
 
-  const handleSignOut = async () => {
-    await signOut();
-    document.cookie = "__session=; path=/; max-age=0";
-    router.push("/");
-  };
-
+  /* ── Full mode ── */
   return (
-    <div className={cn("flex min-h-screen", rtl && "flex-row-reverse")}>
-      {/* ── Sidebar ───────────────────────────────────────────────── */}
-      <aside className={cn("sticky top-0 flex h-screen w-64 flex-col bg-card", rtl ? "border-l" : "border-r")}>
-        <div className="flex h-16 items-center gap-2 px-6">
-          <BarChart3 className="h-6 w-6 text-primary" />
-          <span className="text-lg font-semibold">{t("appName")}</span>
+    <div className="mb-1">
+      {/* Group header — clickable to collapse */}
+      <button
+        onClick={onToggle}
+        className={cn(
+          "flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+          hasActive
+            ? "text-sidebar-primary-foreground"
+            : "text-sidebar-foreground/40 hover:text-sidebar-foreground/70"
+        )}
+      >
+        {label}
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 transition-transform duration-200",
+            collapsed && "-rotate-90"
+          )}
+        />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-0.5 py-0.5">
+              {items.map(({ href, labelKey, icon: Icon }) => {
+                const active =
+                  href === "/dashboard"
+                    ? pathname === "/dashboard"
+                    : pathname.startsWith(href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={onNavigate}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-all duration-150",
+                      active
+                        ? "bg-sidebar-primary/20 text-sidebar-primary-foreground shadow-sm"
+                        : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        "h-4 w-4 shrink-0 transition-colors",
+                        active
+                          ? "text-sidebar-primary"
+                          : "text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70"
+                      )}
+                    />
+                    {t(labelKey)}
+                  </Link>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ── Sidebar Content (shared between desktop & mobile) ──── */
+
+function SidebarContent({
+  pathname,
+  t,
+  rtl,
+  filteredGroups,
+  user,
+  role,
+  years,
+  selectedYear,
+  setSelectedYear,
+  yearsLoading,
+  schoolFilter,
+  setSchoolFilter,
+  schoolLocked,
+  onSignOut,
+  collapsedGroups,
+  toggleGroup,
+  onNavigate,
+  mini,
+  onToggleMini,
+}: {
+  pathname: string;
+  t: (k: TranslationKeys) => string;
+  rtl: boolean;
+  filteredGroups: { label: string; items: NavItem[] }[];
+  user: { email?: string | null } | null;
+  role: string | null;
+  years: string[];
+  selectedYear: string | null;
+  setSelectedYear: (y: string) => void;
+  yearsLoading: boolean;
+  schoolFilter: SchoolFilter;
+  setSchoolFilter: (f: SchoolFilter) => void;
+  schoolLocked: boolean;
+  onSignOut: () => void;
+  collapsedGroups: Record<string, boolean>;
+  toggleGroup: (label: string) => void;
+  onNavigate?: () => void;
+  mini?: boolean;
+  onToggleMini?: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden bg-sidebar">
+      {/* Logo */}
+      <div className={cn("flex h-16 shrink-0 items-center gap-3", mini ? "justify-center px-2" : "px-5")}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary/20">
+          <BarChart3 className="h-5 w-5 text-sidebar-primary" />
         </div>
+        {!mini && (
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-sidebar-foreground leading-tight">
+              {t("appName")}
+            </span>
+            <span className="text-[10px] text-sidebar-foreground/40">
+              Khaled International Schools
+            </span>
+          </div>
+        )}
+      </div>
 
-        <Separator />
-
-        {/* Academic Year Picker */}
-        <div className="px-4 py-3">
-          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <CalendarDays className="h-3.5 w-3.5" />
+      {/* Filters — hidden in mini mode */}
+      {!mini && (
+        <div className="mx-4 shrink-0 space-y-2.5 rounded-xl bg-sidebar-accent/50 p-3">
+        <div>
+          <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+            <CalendarDays className="h-3 w-3" />
             {t("academicYear")}
           </label>
           <select
             value={selectedYear ?? ""}
             onChange={(e) => setSelectedYear(e.target.value)}
             disabled={yearsLoading}
-            className="h-9 w-full rounded-md border bg-background px-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring"
+            className="h-8 w-full rounded-lg border-0 bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-sidebar-primary/50"
           >
             {years.map((code) => {
-              // Convert "22-23" → "2022–2023"
               const parts = code.split("-");
               let label = code;
               if (parts.length === 2) {
@@ -162,85 +409,234 @@ export default function DashboardLayout({
             })}
           </select>
         </div>
-
-        <Separator />
-
-        {/* School Filter */}
-        <div className="px-4 py-3">
-          <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <School className="h-3.5 w-3.5" />
+        <div>
+          <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+            <School className="h-3 w-3" />
             {t("school")}
           </label>
           <select
             value={schoolFilter}
             onChange={(e) => setSchoolFilter(e.target.value as SchoolFilter)}
             disabled={schoolLocked}
-            className="h-9 w-full rounded-md border bg-background px-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-8 w-full rounded-lg border-0 bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-sidebar-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="all">{t("allSchools")}</option>
             <option value="0021-01">{t("boysSchool")}</option>
             <option value="0021-02">{t("girlsSchool")}</option>
           </select>
         </div>
+      </div>
+      )}
 
-        <Separator />
+      {/* Navigation */}
+      <ScrollArea className={cn("min-h-0 flex-1 py-3", mini ? "px-1.5" : "px-3")}>
+        {filteredGroups.map(({ label, items }) => (
+          <NavGroupSection
+            key={label}
+            label={label}
+            items={items}
+            pathname={pathname}
+            t={t}
+            collapsed={!!collapsedGroups[label]}
+            onToggle={() => toggleGroup(label)}
+            onNavigate={onNavigate}
+            mini={mini}
+          />
+        ))}
+      </ScrollArea>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {filteredNav.map(({ href, labelKey, icon: Icon }) => {
-            const active =
-              href === "/dashboard"
-                ? pathname === "/dashboard"
-                : pathname.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {t(labelKey)}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <Separator />
-
-        <div className="p-4">
-          <p className="mb-1 truncate text-xs text-muted-foreground">
-            {user?.email ?? "—"}
-          </p>
-          {role && (
-            <p className="mb-2 truncate text-xs font-medium text-primary">
-              {ROLES[role]}
-            </p>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={handleSignOut}
+      {/* Collapse toggle — desktop only */}
+      {onToggleMini && (
+        <div className="shrink-0 flex justify-center border-t border-sidebar-border py-2">
+          <button
+            onClick={onToggleMini}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
           >
-            <LogOut className={cn("h-4 w-4", rtl ? "ml-2" : "mr-2")} />
-            {t("signOut")}
-          </Button>
+            {mini ? (
+              <ChevronsRight className={cn("h-4 w-4", rtl && "rotate-180")} />
+            ) : (
+              <ChevronsLeft className={cn("h-4 w-4", rtl && "rotate-180")} />
+            )}
+          </button>
         </div>
+      )}
+
+      {/* User info + sign-out */}
+      <div className={cn("shrink-0 border-t border-sidebar-border", mini ? "p-2" : "p-4")}>
+        <div className={cn("flex items-center", mini ? "flex-col gap-2" : "gap-3")}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sidebar-primary/20 text-sm font-bold text-sidebar-primary cursor-default">
+                {user?.email?.charAt(0).toUpperCase() ?? "?"}
+              </div>
+            </TooltipTrigger>
+            {mini && (
+              <TooltipContent side="right" className="text-xs">
+                <p>{user?.email ?? "—"}</p>
+                {role && <p className="text-muted-foreground">{ROLES[role as keyof typeof ROLES]}</p>}
+              </TooltipContent>
+            )}
+          </Tooltip>
+          {!mini && (
+            <>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-xs font-medium text-sidebar-foreground">
+                  {user?.email ?? "—"}
+                </p>
+                {role && (
+                  <p className="truncate text-[10px] text-sidebar-primary">
+                    {ROLES[role as keyof typeof ROLES]}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                onClick={onSignOut}
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {mini && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-sidebar-foreground/40 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                  onClick={onSignOut}
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">
+                Sign out
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Layout ────────────────────────────────────────── */
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const { user, role, signOut, can } = useAuth();
+  const router = useRouter();
+  const { years, selectedYear, selectedLabel, setSelectedYear, loading: yearsLoading } =
+    useAcademicYear();
+  const { schoolFilter, setSchoolFilter, locked: schoolLocked } = useSchoolFilter();
+  const { t, isRTL: rtl } = useLanguage();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [sidebarMini, setSidebarMini] = useState(false);
+
+  const toggleGroup = (label: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
+  // Filter nav groups by user permissions
+  const filteredGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(({ permission }) => can(permission)),
+  })).filter((group) => group.items.length > 0);
+
+  const handleSignOut = async () => {
+    await signOut();
+    document.cookie = "__session=; path=/; max-age=0";
+    router.push("/");
+  };
+
+  const sidebarProps = {
+    pathname,
+    t,
+    rtl,
+    filteredGroups,
+    user,
+    role,
+    years,
+    selectedYear,
+    setSelectedYear,
+    yearsLoading,
+    schoolFilter,
+    setSchoolFilter,
+    schoolLocked,
+    onSignOut: handleSignOut,
+    collapsedGroups,
+    toggleGroup,
+  };
+
+  return (
+    <TooltipProvider>
+    <div className={cn("flex min-h-screen", rtl && "flex-row-reverse")}>
+      {/* ── Desktop Sidebar ──────────────────────────────────── */}
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-screen shrink-0 transition-[width] duration-200 ease-in-out lg:flex lg:flex-col",
+          sidebarMini ? "w-[64px]" : "w-[260px]",
+          rtl ? "border-l border-sidebar-border" : "border-r border-sidebar-border"
+        )}
+      >
+        <SidebarContent
+          {...sidebarProps}
+          mini={sidebarMini}
+          onToggleMini={() => setSidebarMini((v) => !v)}
+        />
       </aside>
 
-      {/* ── Main content ──────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto bg-muted/40">
-        {/* Top bar with notification bell + language switcher */}
-        <div className="flex items-center justify-end gap-2 border-b bg-card px-6 py-2">
-          <ThemeToggle />
-          <LanguageSwitcher variant="icon" />
-          <NotificationBell />
-        </div>
-        <div className="p-6 lg:p-8">
+      {/* ── Main content ──────────────────────────────────────── */}
+      <main className="flex flex-1 flex-col overflow-x-hidden">
+        {/* Top bar */}
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-xl lg:px-6">
+          {/* Mobile menu trigger */}
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="lg:hidden">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              side={rtl ? "right" : "left"}
+              className="w-[280px] p-0 bg-sidebar border-sidebar-border"
+            >
+              <SheetTitle className="sr-only">Navigation</SheetTitle>
+              <SidebarContent
+                {...sidebarProps}
+                onNavigate={() => setMobileOpen(false)}
+              />
+            </SheetContent>
+          </Sheet>
+
+          {/* Current year badge */}
+          <div className="hidden sm:flex items-center gap-2 rounded-lg bg-primary/5 px-3 py-1.5">
+            <CalendarDays className="h-3.5 w-3.5 text-primary" />
+            <span className="text-xs font-medium text-primary">
+              {selectedLabel}
+            </span>
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Right actions */}
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <LanguageSwitcher variant="icon" />
+            <NotificationBell />
+          </div>
+        </header>
+
+        {/* Page content */}
+        <div className="flex-1 bg-muted/30 p-4 lg:p-8">
           {children}
         </div>
       </main>
@@ -248,5 +644,6 @@ export default function DashboardLayout({
       {/* ── Command Palette (Ctrl+K) ── */}
       <CommandPalette />
     </div>
+    </TooltipProvider>
   );
 }

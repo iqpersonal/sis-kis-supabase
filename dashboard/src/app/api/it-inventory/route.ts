@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { CACHE_SHORT } from "@/lib/cache-headers";
 import { verifyAuth } from "@/lib/api-auth";
+import { hasPermission } from "@/lib/rbac";
 
 /**
  * IT Inventory API
@@ -39,12 +40,15 @@ export async function GET(req: NextRequest) {
 
       // Use .select() to read only the fields we need (saves bandwidth & cost)
       const assetsSnap = await coll
-        .select("status", "asset_type", "branch", "purchase_price", "warranty_expiry")
+        .select("status", "asset_type", "branch", "purchase_price", "warranty_expiry",
+                "purchase_date", "useful_life_years", "salvage_value", "next_maintenance_date")
         .limit(10000)
         .get();
 
       let total = 0, active = 0, available = 0, maintenance = 0, retired = 0, lost = 0;
       let warrantyExpiring = 0, totalValue = 0;
+      let totalDepreciation = 0, totalBookValue = 0;
+      let maintenanceDue = 0;
       const byType: Record<string, number> = {};
       const byBranch: Record<string, number> = {};
 
@@ -78,6 +82,26 @@ export async function GET(req: NextRequest) {
 
         // Total value
         if (typeof d.purchase_price === "number") totalValue += d.purchase_price;
+
+        // Straight-line depreciation
+        if (typeof d.purchase_price === "number" && d.purchase_date && typeof d.useful_life_years === "number" && d.useful_life_years > 0) {
+          const salvage = typeof d.salvage_value === "number" ? d.salvage_value : 0;
+          const purchaseDate = new Date(d.purchase_date as string);
+          const ageYears = (now.getTime() - purchaseDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+          const annualDep = (d.purchase_price - salvage) / d.useful_life_years;
+          const accDep = Math.min(annualDep * ageYears, d.purchase_price - salvage);
+          totalDepreciation += Math.max(0, accDep);
+          totalBookValue += Math.max(salvage, d.purchase_price - accDep);
+        } else if (typeof d.purchase_price === "number") {
+          totalBookValue += d.purchase_price;
+        }
+
+        // Maintenance due (within next 14 days)
+        if (d.next_maintenance_date) {
+          const maint = new Date(d.next_maintenance_date as string);
+          const in14 = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+          if (maint <= in14) maintenanceDue++;
+        }
       }
 
       return NextResponse.json({
@@ -91,6 +115,9 @@ export async function GET(req: NextRequest) {
         by_type: byType,
         by_branch: byBranch,
         total_value: totalValue,
+        total_depreciation: Math.round(totalDepreciation * 100) / 100,
+        total_book_value: Math.round(totalBookValue * 100) / 100,
+        maintenance_due: maintenanceDue,
       }, { headers: CACHE_SHORT });
     }
 
@@ -177,15 +204,34 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { action } = body;
 
+    // Permission check — all write actions require inventory.manage
+    if (!hasPermission(auth.role, "inventory.manage")) {
+      return NextResponse.json({ error: "Forbidden: insufficient permissions" }, { status: 403 });
+    }
+
     // ── Create asset ──
     if (action === "create_asset") {
       const { asset_type, brand, model, serial_number, purchase_date, purchase_price,
-        warranty_expiry, status, condition, location, branch, notes, specs } = body;
+        warranty_expiry, status, condition, location, branch, notes, specs,
+        useful_life_years, salvage_value, next_maintenance_date, maintenance_interval_days } = body;
 
       if (!asset_type || !brand || !model || !serial_number) {
         return NextResponse.json(
           { error: "asset_type, brand, model, and serial_number are required" },
           { status: 400 }
+        );
+      }
+
+      // Check for duplicate serial number
+      const dupSnap = await adminDb
+        .collection("it_assets")
+        .where("serial_number", "==", serial_number)
+        .limit(1)
+        .get();
+      if (!dupSnap.empty) {
+        return NextResponse.json(
+          { error: `An asset with serial number "${serial_number}" already exists` },
+          { status: 409 }
         );
       }
 
@@ -223,6 +269,10 @@ export async function POST(req: NextRequest) {
         specs: specs || {},
         created_at: new Date().toISOString(),
         updated_by: body.performed_by || "system",
+        useful_life_years: typeof useful_life_years === "number" ? useful_life_years : null,
+        salvage_value: typeof salvage_value === "number" ? salvage_value : null,
+        next_maintenance_date: next_maintenance_date || null,
+        maintenance_interval_days: typeof maintenance_interval_days === "number" ? maintenance_interval_days : null,
       };
 
       const ref = await adminDb.collection("it_assets").add(doc);
@@ -280,6 +330,16 @@ export async function POST(req: NextRequest) {
           { error: "asset_id and staff_number required" },
           { status: 400 }
         );
+      }
+
+      // Validate staff exists
+      const staffSnap = await adminDb
+        .collection("staff")
+        .where("Staff_Number", "==", staff_number)
+        .limit(1)
+        .get();
+      if (staffSnap.empty) {
+        return NextResponse.json({ error: "Staff member not found" }, { status: 404 });
       }
 
       // Find the asset doc by asset_id field
@@ -394,6 +454,93 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
+    // ── Schedule maintenance ──
+    if (action === "schedule_maintenance") {
+      const { asset_id, next_maintenance_date, maintenance_interval_days, notes: maintNotes, performed_by } = body;
+      if (!asset_id || !next_maintenance_date) {
+        return NextResponse.json({ error: "asset_id and next_maintenance_date required" }, { status: 400 });
+      }
+
+      const snap = await adminDb
+        .collection("it_assets")
+        .where("asset_id", "==", asset_id)
+        .limit(1)
+        .get();
+      if (snap.empty) {
+        return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+      }
+
+      const updates: Record<string, unknown> = {
+        next_maintenance_date,
+      };
+      if (typeof maintenance_interval_days === "number" && maintenance_interval_days > 0) {
+        updates.maintenance_interval_days = maintenance_interval_days;
+      }
+
+      await snap.docs[0].ref.update(updates);
+
+      await adminDb.collection("it_asset_history").add({
+        asset_id,
+        action: "maintenance",
+        from_staff: null,
+        to_staff: null,
+        timestamp: new Date().toISOString(),
+        performed_by: performed_by || "system",
+        notes: maintNotes || `Maintenance scheduled for ${next_maintenance_date}`,
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Complete maintenance ──
+    if (action === "complete_maintenance") {
+      const { asset_id, condition: maintCondition, notes: maintNotes, performed_by } = body;
+      if (!asset_id) {
+        return NextResponse.json({ error: "asset_id required" }, { status: 400 });
+      }
+
+      const snap = await adminDb
+        .collection("it_assets")
+        .where("asset_id", "==", asset_id)
+        .limit(1)
+        .get();
+      if (snap.empty) {
+        return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+      }
+
+      const data = snap.docs[0].data();
+      const updates: Record<string, unknown> = {
+        status: "available",
+      };
+
+      if (maintCondition && ASSET_CONDITIONS.includes(maintCondition)) {
+        updates.condition = maintCondition;
+      }
+
+      // Auto-schedule next maintenance if interval is set
+      if (typeof data.maintenance_interval_days === "number" && data.maintenance_interval_days > 0) {
+        const next = new Date();
+        next.setDate(next.getDate() + data.maintenance_interval_days);
+        updates.next_maintenance_date = next.toISOString().split("T")[0];
+      } else {
+        updates.next_maintenance_date = null;
+      }
+
+      await snap.docs[0].ref.update(updates);
+
+      await adminDb.collection("it_asset_history").add({
+        asset_id,
+        action: "maintenance",
+        from_staff: null,
+        to_staff: null,
+        timestamp: new Date().toISOString(),
+        performed_by: performed_by || "system",
+        notes: maintNotes || "Maintenance completed",
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
     // ── Delete asset ──
     if (action === "delete_asset") {
       const { id } = body;
@@ -448,6 +595,10 @@ export async function POST(req: NextRequest) {
           specs: item.specs || {},
           created_at: new Date().toISOString(),
           updated_by: performed_by || "system",
+          useful_life_years: typeof item.useful_life_years === "number" ? item.useful_life_years : null,
+          salvage_value: typeof item.salvage_value === "number" ? item.salvage_value : null,
+          next_maintenance_date: item.next_maintenance_date || null,
+          maintenance_interval_days: typeof item.maintenance_interval_days === "number" ? item.maintenance_interval_days : null,
         });
         imported++;
       }

@@ -81,6 +81,7 @@ export default function UserManagementPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Classes/subjects lists for multi-select
   const { selectedYear } = useAcademicYear();
@@ -289,9 +290,14 @@ export default function UserManagementPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
-      const msg = data.created
-        ? `User ${email} assigned role ${ROLES[newRole as Role]}. Account was auto-created — they will receive a password reset email.`
-        : `User ${email} assigned role ${ROLES[newRole as Role]}`;
+      let msg = data.created
+        ? `User ${email} assigned role ${ROLES[newRole as Role]}. Account was auto-created.`
+        : `User ${email} assigned role ${ROLES[newRole as Role]}.`;
+      if (data.emailSent) {
+        msg += " Welcome email sent successfully.";
+      } else if (data.emailError) {
+        msg += ` ⚠ Email failed: ${data.emailError}`;
+      }
       setSuccess(msg);
       setEmail("");
       setNewMajor("");
@@ -685,10 +691,16 @@ export default function UserManagementPage() {
 
       {/* Users table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="text-lg">
             {t("adminUsers" as never) || "Admin Users"}
           </CardTitle>
+          <Input
+            placeholder="Search by email, name, or role…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="max-w-xs h-9"
+          />
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -709,7 +721,19 @@ export default function UserManagementPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((u) => (
+                {users
+                  .filter((u) => {
+                    if (!searchQuery.trim()) return true;
+                    const q = searchQuery.toLowerCase();
+                    const roleLabel = ROLES[u.role]?.toLowerCase() || "";
+                    return (
+                      (u.email || "").toLowerCase().includes(q) ||
+                      (u.displayName || "").toLowerCase().includes(q) ||
+                      u.role.toLowerCase().includes(q) ||
+                      roleLabel.includes(q)
+                    );
+                  })
+                  .map((u) => (
                   <TableRow key={u.uid}>
                     <TableCell className="font-mono text-sm">
                       {u.email || u.uid}
