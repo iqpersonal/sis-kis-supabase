@@ -4,10 +4,35 @@ import { CACHE_SHORT } from "@/lib/cache-headers";
 
 /* ── Server-side search index cache (avoids re-reading 5000 docs) ── */
 let indexCache: {
-  entries: { student_number: string; name: string; family: string }[];
+  entries: { student_number: string; name: string; family: string; class?: string; section?: string }[];
   ts: number;
 } | null = null;
 const INDEX_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+async function getStudentProgressByNumber(studentNumber: string) {
+  const trimmed = studentNumber.trim();
+
+  const directSnap = await adminDb
+    .collection("student_progress")
+    .doc(trimmed)
+    .get();
+
+  if (directSnap.exists) {
+    return directSnap.data() ?? null;
+  }
+
+  const byFieldSnap = await adminDb
+    .collection("student_progress")
+    .where("student_number", "==", trimmed)
+    .limit(1)
+    .get();
+
+  if (!byFieldSnap.empty) {
+    return byFieldSnap.docs[0].data() ?? null;
+  }
+
+  return null;
+}
 
 /**
  * GET /api/student-progress?studentNumber=xxx
@@ -25,19 +50,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const docRef = adminDb
-      .collection("student_progress")
-      .doc(studentNumber.trim());
-    const snap = await docRef.get();
+    const data = await getStudentProgressByNumber(studentNumber);
 
-    if (!snap.exists) {
+    if (!data) {
       return NextResponse.json(
         { error: "Student not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ data: snap.data() }, { headers: CACHE_SHORT });
+    return NextResponse.json({ data }, { headers: CACHE_SHORT });
   } catch (err) {
     console.error("Failed to fetch student progress:", err);
     return NextResponse.json(
@@ -123,6 +145,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results });
     }
 
+    // ── Browse options mode: return available classes and sections for a year ──
+    if (body.mode === "browse_options" && body.year) {
+      const indexDoc = await adminDb
+        .collection("parent_config")
+        .doc(`browse_${body.year}`)
+        .get();
+
+      if (!indexDoc.exists) {
+        return NextResponse.json({ classes: [] });
+      }
+
+      const buckets = (indexDoc.data()?.buckets ?? {}) as Record<string, unknown[]>;
+      const schoolFilter = body.school && body.school !== "all" ? body.school : null;
+      const classMap: Record<string, Set<string>> = {};
+      for (const key of Object.keys(buckets)) {
+        const [cls, section, bSchool] = key.split("__");
+        if (!cls) continue;
+        if (schoolFilter && bSchool !== schoolFilter) continue;
+        if (!classMap[cls]) classMap[cls] = new Set();
+        if (section) classMap[cls].add(section);
+      }
+      const classes = Object.entries(classMap)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([cls, sections]) => ({ cls, sections: Array.from(sections).sort() }));
+      return NextResponse.json({ classes });
+    }
+
     // ── Search mode ──
     const { query: searchQuery = "", limit: maxResults = 20 } = body;
 
@@ -135,14 +184,10 @@ export async function POST(req: NextRequest) {
 
     const q = searchQuery.trim();
 
-    // If it looks like a student number (contains digits and dashes)
-    if (/^\d{4}-\d+$/.test(q) || /^0021-/.test(q)) {
-      const snap = await adminDb
-        .collection("student_progress")
-        .doc(q)
-        .get();
-      if (snap.exists) {
-        const d = snap.data()!;
+    // If it looks like a student number, try direct doc lookup first.
+    if (/^\d+$/.test(q) || /^\d{4}-\d+$/.test(q) || /^0021-/.test(q)) {
+      const d = await getStudentProgressByNumber(q);
+      if (d) {
         return NextResponse.json({
           results: [
             {
@@ -189,53 +234,43 @@ export async function POST(req: NextRequest) {
           .get();
         entries = snapshot.docs.map((doc) => {
           const d = doc.data();
+          const sortedYrs = Object.keys(d.years || {}).sort();
+          const latestYr = sortedYrs[sortedYrs.length - 1] ?? "";
           return {
             student_number: d.student_number || "",
             name: d.student_name || "",
             family: d.family_number || "",
+            class: d.years?.[latestYr]?.class_name || "",
+            section: d.years?.[latestYr]?.section || "",
           };
         });
         indexCache = { entries, ts: Date.now() };
       }
 
       const lowerQ = q.toLowerCase();
-      const matchedNumbers: string[] = [];
+      const matched: { student_number: string; name: string; family: string }[] = [];
 
       for (const e of entries) {
-        if (matchedNumbers.length >= maxResults) break;
+        if (matched.length >= maxResults) break;
         if (
           e.name.toLowerCase().includes(lowerQ) ||
           e.family.toLowerCase().includes(lowerQ) ||
           e.student_number.toLowerCase().includes(lowerQ)
         ) {
-          matchedNumbers.push(e.student_number);
+          matched.push(e);
         }
       }
 
-      // Fetch full docs only for matches
-      const results = await Promise.all(
-        matchedNumbers.map(async (sn) => {
-          const snap = await adminDb
-            .collection("student_progress")
-            .doc(sn)
-            .get();
-          if (!snap.exists) return null;
-          const d = snap.data()!;
-          const sortedYears = Object.keys(d.years || {}).sort();
-          const latestYr = sortedYears[sortedYears.length - 1] ?? "";
-          return {
-            student_number: d.student_number,
-            student_name: d.student_name,
-            gender: d.gender,
-            family_number: d.family_number,
-            years: sortedYears,
-            latest_class: d.years?.[latestYr]?.class_name ?? "",
-            latest_avg: d.years?.[latestYr]?.overall_avg ?? 0,
-          };
-        })
-      );
+      // Return directly from cache — no extra Firestore reads needed
+      const results = matched.map((e) => ({
+        student_number: e.student_number,
+        student_name: e.name,
+        family_number: e.family,
+        grade: e.class || "",
+        section: e.section || "",
+      }));
 
-      return NextResponse.json({ results: results.filter(Boolean) });
+      return NextResponse.json({ results });
     }
 
     // Use pre-built index
@@ -253,32 +288,14 @@ export async function POST(req: NextRequest) {
       )
       .slice(0, maxResults);
 
-    // Fetch full docs for matches
-    const results = await Promise.all(
-      matches.map(async (m) => {
-        const snap = await adminDb
-          .collection("student_progress")
-          .doc(m.student_number)
-          .get();
-        if (!snap.exists) return null;
-        const d = snap.data()!;
-        const sortedYears = Object.keys(d.years || {}).sort();
-        const latestYr = sortedYears[sortedYears.length - 1] ?? "";
-        return {
-          student_number: d.student_number,
-          student_name: d.student_name,
-          gender: d.gender,
-          family_number: d.family_number,
-          years: sortedYears,
-          latest_class: d.years?.[latestYr]?.class_name ?? "",
-          latest_avg: d.years?.[latestYr]?.overall_avg ?? 0,
-        };
-      })
-    );
+    // Return directly from index — no extra Firestore reads needed
+    const results = matches.map((m) => ({
+      student_number: m.student_number,
+      student_name: m.name,
+      family_number: m.family,
+    }));
 
-    return NextResponse.json({
-      results: results.filter(Boolean),
-    });
+    return NextResponse.json({ results }); // pre-built index has no class/section data
   } catch (err) {
     console.error("Student search error:", err);
     return NextResponse.json(

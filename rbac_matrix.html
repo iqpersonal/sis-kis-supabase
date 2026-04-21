@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SiS Dashboard — Role Access Matrix</title>
+<style>
+  @page { size: landscape; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #1a1a1a; padding: 10px; }
+  h1 { font-size: 14pt; margin-bottom: 2px; }
+  .subtitle { font-size: 9pt; color: #666; margin-bottom: 8px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 2px 4px; text-align: center; vertical-align: middle; }
+  th { background: #f0f0f0; font-weight: 600; font-size: 7pt; }
+  th.perm { text-align: left; min-width: 130px; }
+  td.perm { text-align: left; font-size: 7pt; }
+  .group-header td { background: #2563eb; color: #fff; font-weight: 700; font-size: 7.5pt; text-align: left; padding: 3px 6px; }
+  .check { color: #16a34a; font-weight: 700; font-size: 9pt; }
+  .edit { color: #ea580c; font-weight: 700; font-size: 8pt; }
+  .manage { color: #2563eb; font-weight: 700; font-size: 8pt; }
+  tr:nth-child(even) { background: #fafafa; }
+  .footer { margin-top: 8px; font-size: 7pt; color: #888; }
+  .legend { margin-top: 6px; font-size: 7.5pt; }
+  .legend span { margin-right: 14px; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+<h1>KIS SiS Dashboard — Role-Based Access Control Matrix</h1>
+<div class="subtitle">Generated: April 19, 2026 &nbsp;|&nbsp; 16 Roles &nbsp;|&nbsp; 72 Permissions</div>
+<div class="legend">
+  <span class="check">✓</span> = View &nbsp;&nbsp;
+  <span class="edit">E</span> = Edit &nbsp;&nbsp;
+  <span class="manage">M</span> = Manage &nbsp;&nbsp;
+  <span style="color:#7c3aed;font-weight:700;">R</span> = Request &nbsp;&nbsp;
+  <span style="font-weight:700;">ALL</span> = All Permissions
+</div>
+<br>
+<table>
+<thead>
+<tr>
+  <th class="perm">Permission</th>
+  <th>Super<br>Admin</th>
+  <th>School<br>Admin</th>
+  <th>IT<br>Manager</th>
+  <th>Academic<br>Director</th>
+  <th>Head of<br>Section</th>
+  <th>Subject<br>Coord.</th>
+  <th>Academic<br>Coord.</th>
+  <th>Finance</th>
+  <th>Accounts</th>
+  <th>Registrar</th>
+  <th>Teacher</th>
+  <th>Viewer</th>
+  <th>Bookshop</th>
+  <th>Store<br>Clerk</th>
+  <th>IT<br>Admin</th>
+  <th>Admissions</th>
+</tr>
+</thead>
+<tbody>
+<!-- Dashboard -->
+<tr class="group-header"><td colspan="17">Dashboard</td></tr>
+<tr><td class="perm">dashboard.view</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+
+<!-- Students -->
+<tr class="group-header"><td colspan="17">Students</td></tr>
+<tr><td class="perm">students.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">students.edit</td><td class="edit">E</td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">students.profile</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+
+<!-- Academics -->
+<tr class="group-header"><td colspan="17">Academics</td></tr>
+<tr><td class="perm">academics.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">subjects.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">assessments.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">progress.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">terms.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">subject_trends.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">honor_roll.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">at_risk.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">quizzes.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">quizzes.manage</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td></tr>
+
+<!-- Kindergarten -->
+<tr class="group-header"><td colspan="17">Kindergarten</td></tr>
+<tr><td class="perm">kg.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">kg.manage</td><td class="manage">M</td><td class="manage">M</td><td></td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td></tr>
+
+<!-- Operations -->
+<tr class="group-header"><td colspan="17">Operations</td></tr>
+<tr><td class="perm">attendance.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">attendance.edit</td><td class="edit">E</td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">documents.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">transfers.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">transfers.edit</td><td class="edit">E</td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">library.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+
+<!-- Stores -->
+<tr class="group-header"><td colspan="17">Stores &amp; Inventory</td></tr>
+<tr><td class="perm">general_store.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td></tr>
+<tr><td class="perm">general_store.manage</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td><td></td></tr>
+<tr><td class="perm">general_store.request</td><td style="color:#7c3aed;font-weight:700;">R</td><td style="color:#7c3aed;font-weight:700;">R</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="color:#7c3aed;font-weight:700;">R</td><td></td><td></td></tr>
+<tr><td class="perm">it_store.view</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td></tr>
+<tr><td class="perm">it_store.manage</td><td class="manage">M</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td></tr>
+<tr><td class="perm">it_store.request</td><td style="color:#7c3aed;font-weight:700;">R</td><td style="color:#7c3aed;font-weight:700;">R</td><td style="color:#7c3aed;font-weight:700;">R</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td style="color:#7c3aed;font-weight:700;">R</td><td></td></tr>
+<tr><td class="perm">store_reports.view</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td></tr>
+<tr><td class="perm">inventory.view</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td></tr>
+<tr><td class="perm">inventory.manage</td><td class="manage">M</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td></tr>
+
+<!-- Finance -->
+<tr class="group-header"><td colspan="17">Finance</td></tr>
+<tr><td class="perm">fees.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">fees.edit</td><td class="edit">E</td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td class="edit">E</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">delinquency.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">book_sales.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td></tr>
+<tr><td class="perm">book_sales.manage</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td><td></td><td></td></tr>
+
+<!-- Communication -->
+<tr class="group-header"><td colspan="17">Communication</td></tr>
+<tr><td class="perm">notifications.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">announcements.manage</td><td class="manage">M</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">tickets.manage</td><td class="manage">M</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td><td></td></tr>
+
+<!-- Reports -->
+<tr class="group-header"><td colspan="17">Reports &amp; Analytics</td></tr>
+<tr><td class="perm">analytics.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td class="check">✓</td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">year_comparison.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">ai_insights.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">bulk_export.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+
+<!-- Admissions -->
+<tr class="group-header"><td colspan="17">Admissions</td></tr>
+<tr><td class="perm">admissions.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td></tr>
+<tr><td class="perm">admissions.manage</td><td class="manage">M</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="manage">M</td></tr>
+<tr><td class="perm">admissions.reports</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td></tr>
+
+<!-- Admin -->
+<tr class="group-header"><td colspan="17">Administration</td></tr>
+<tr><td class="perm">staff.view</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">upload.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">certificates.print</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">transcript_settings.view</td><td class="check">✓</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">admin.users</td><td class="manage">M</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td class="perm">admin.audit_log</td><td class="check">✓</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+  <strong>Notes:</strong> Super Admin &amp; School Admin inherit all permissions (School Admin excludes admin.users &amp; admin.audit_log). 
+  Academic Director, Head of Section, and Subject Coordinator are further scoped to their assigned school branch at runtime.
+  Accounts role is strictly view-only across all assigned modules.
+</div>
+
+<script>window.onload = function() { window.print(); }</script>
+</body>
+</html>

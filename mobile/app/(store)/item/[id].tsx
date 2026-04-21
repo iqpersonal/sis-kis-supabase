@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
   Image, Alert, Modal, ActivityIndicator, Linking,
@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, limit, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
 import { useItemTransactions } from "@/hooks/use-store-data";
@@ -58,9 +58,34 @@ export default function ItemDetailScreen() {
   // Barcode product lookup
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupDone, setLookupDone] = useState(false);
+  const prevBarcodeRef = useRef(params.barcode || "");
 
   // Transactions
   const { transactions } = useItemTransactions(config, item?.item_id);
+
+  // Reset form when arriving with a NEW barcode (e.g. scan → add → back → scan another → add)
+  useEffect(() => {
+    if (isNew && params.barcode && params.barcode !== prevBarcodeRef.current) {
+      prevBarcodeRef.current = params.barcode;
+      // Full form reset for the new barcode
+      setEditForm({
+        name: "",
+        name_ar: "",
+        category: config.categories[0] as string,
+        unit: "pcs",
+        quantity: 0,
+        reorder_level: 5,
+        location: "",
+        branch: "",
+        notes: "",
+        barcode: params.barcode,
+        description: "",
+        image_url: "",
+      });
+      setLocalImageUri(null);
+      setLookupDone(false);
+    }
+  }, [isNew, params.barcode, config.categories]);
 
   // Auto-lookup barcode when arriving from scan with a barcode
   useEffect(() => {
@@ -71,7 +96,7 @@ export default function ItemDetailScreen() {
         handleBarcodeLookup(params.barcode);
       }
     }
-  }, [isNew, params.barcode]);
+  }, [isNew, params.barcode, lookupDone]);
 
   const handleBarcodeLookup = async (barcode?: string) => {
     const code = barcode || editForm.barcode;
@@ -169,8 +194,21 @@ export default function ItemDetailScreen() {
 
   const handleSave = async () => {
     if (!editForm.name.trim()) return Alert.alert("Error", "Name is required");
+    if (editForm.quantity < 0) return Alert.alert("Error", "Quantity cannot be negative");
+    if (editForm.reorder_level < 0) return Alert.alert("Error", "Reorder level cannot be negative");
     setSaving(true);
     try {
+      // Check for duplicate barcode
+      if (editForm.barcode) {
+        const normalized = normalizeBarcode(editForm.barcode);
+        const q = query(collection(db, config.collections.items), where("barcode", "==", normalized), limit(1));
+        const existing = await getDocs(q);
+        const isDuplicate = !existing.empty && (isNew || existing.docs[0].id !== item?.id);
+        if (isDuplicate) {
+          setSaving(false);
+          return Alert.alert("Duplicate Barcode", "An item with this barcode already exists.");
+        }
+      }
       if (isNew) {
         // Upload local image to Firebase Storage if picked
         let finalImageUrl = editForm.image_url || "";
@@ -478,6 +516,8 @@ export default function ItemDetailScreen() {
               <TouchableOpacity
                 style={styles.imageActionBtn}
                 onPress={async () => {
+                  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                  if (status !== "granted") return Alert.alert("Permission needed", "Gallery access is required.");
                   const result = await ImagePicker.launchImageLibraryAsync({
                     quality: 0.7,
                     allowsEditing: true,

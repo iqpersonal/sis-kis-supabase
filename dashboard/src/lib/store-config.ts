@@ -9,6 +9,7 @@ export interface StoreConfig {
     items: string;
     requests: string;
     transactions: string;
+    delivery_notes: string;
   };
   categories: readonly string[];
   categoryLabels: Record<string, string>;
@@ -24,6 +25,7 @@ export const GENERAL_STORE_CONFIG: StoreConfig = {
     items: "gs_items",
     requests: "gs_requests",
     transactions: "gs_transactions",
+    delivery_notes: "delivery_notes",
   },
   categories: ["stationery", "office_supplies", "cleaning", "classroom", "furniture", "other"],
   categoryLabels: {
@@ -53,6 +55,7 @@ export const IT_STORE_CONFIG: StoreConfig = {
     items: "its_items",
     requests: "its_requests",
     transactions: "its_transactions",
+    delivery_notes: "delivery_notes",
   },
   categories: ["toner_ink", "cables", "peripherals", "storage", "networking", "components", "other"],
   categoryLabels: {

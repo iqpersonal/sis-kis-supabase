@@ -45,16 +45,49 @@ export async function GET(req: NextRequest) {
       | undefined;
 
     if (assigned && assigned.length > 0) {
-      const classes: ClassInfo[] = assigned.map((a: any) => ({
-        id: a.classId,
-        classId: a.classId,
-        className: a.className,
-        section: a.section,
-        subject: a.subject || "",
-        teacher: teacherData.displayName || "",
-        year: a.year,
-        studentCount: 0,
-      }));
+      // Fetch student counts for each assigned class in parallel
+      const classes: ClassInfo[] = await Promise.all(
+        assigned.map(async (a: any) => {
+          let studentCount = 0;
+          try {
+            // Look up section doc to get Class_Code / Section_Code
+            if (a.classId) {
+              const secDoc = await adminDb.collection("sections").doc(a.classId).get();
+              if (secDoc.exists) {
+                const sd = secDoc.data()!;
+                const classCode = String(sd.Class_Code || "");
+                const sectionCode = String(sd.Section_Code || "");
+                let query: FirebaseFirestore.Query = adminDb
+                  .collection("registrations")
+                  .where("Class_Code", "==", classCode)
+                  .where("Section_Code", "==", sectionCode);
+                if (sd.Major_Code) {
+                  query = query.where("Major_Code", "==", String(sd.Major_Code));
+                }
+                if (a.year) {
+                  query = query.where("Academic_Year", "==", a.year);
+                }
+                const regSnap = await query.get();
+                studentCount = regSnap.docs.filter(
+                  (d) => !d.data().Termination_Date
+                ).length;
+              }
+            }
+          } catch (e) {
+            console.error(`Error counting students for ${a.classId}:`, e);
+          }
+          return {
+            id: a.classId,
+            classId: a.classId,
+            className: a.className,
+            section: a.section,
+            subject: a.subject || "",
+            teacher: teacherData.displayName || "",
+            year: a.year,
+            studentCount,
+          };
+        })
+      );
       return NextResponse.json({ classes }, { headers: CACHE_PRIVATE });
     }
 

@@ -37,10 +37,12 @@ export default function QuickIssueScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, "admin_users"));
+        const snap = await getDocs(collection(db, "staff"));
         const names: string[] = [];
         snap.forEach((d) => {
-          const n = d.data().displayName;
+          const data = d.data();
+          if (data.is_active === false) return;
+          const n = data.E_Full_Name || data.A_Full_Name;
           if (n) names.push(n);
         });
         names.sort((a, b) => a.localeCompare(b));

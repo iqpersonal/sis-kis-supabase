@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Bell, AlertTriangle, GraduationCap, FileWarning, CalendarX, Info } from "lucide-react";
+import { Bell, AlertTriangle, GraduationCap, FileWarning, CalendarX, Info, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -9,12 +9,13 @@ import Link from "next/link";
 
 interface Notification {
   id: string;
-  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info";
+  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info" | "store_low_stock" | "store_out_of_stock";
   severity: "critical" | "warning" | "info";
   title: string;
   message: string;
   student_number?: string;
   student_name?: string;
+  store_type?: "general" | "it";
   created_at: string;
   read: boolean;
 }
@@ -24,6 +25,8 @@ const typeIcons: Record<string, React.ElementType> = {
   "low-grade": GraduationCap,
   "document-expired": FileWarning,
   "document-expiring": FileWarning,
+  store_low_stock: Package,
+  store_out_of_stock: Package,
   info: Info,
 };
 
@@ -174,8 +177,11 @@ export function NotificationBell() {
               </div>
             ) : (
               notifications.map((n) => {
-                const Icon = typeIcons[n.type] || Info;
-                const link = getStudentLink(n);
+                const isStoreNotif = n.type === "store_low_stock" || n.type === "store_out_of_stock";
+                const Icon = isStoreNotif ? Package : (typeIcons[n.type] || Info);
+                const link = isStoreNotif
+                  ? (n.store_type === "it" ? "/dashboard/it-store" : "/dashboard/general-store")
+                  : getStudentLink(n);
 
                 const handleClick = () => {
                   if (!n.read) markAsRead([n.id]);

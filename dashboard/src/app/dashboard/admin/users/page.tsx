@@ -30,6 +30,7 @@ interface AdminUser {
   email?: string;
   displayName?: string;
   role: Role;
+  secondary_roles?: Role[];
   grade?: string;
   createdAt?: string;
   assigned_major?: string;
@@ -74,6 +75,7 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [newRole, setNewRole] = useState<Role>("viewer");
+  const [newSecondaryRoles, setNewSecondaryRoles] = useState<Role[]>([]);
   const [newMajor, setNewMajor] = useState<string>("");
   const [newSupervisedClasses, setNewSupervisedClasses] = useState<string[]>([]);
   const [newSupervisedSubjects, setNewSupervisedSubjects] = useState<string[]>([]);
@@ -124,6 +126,8 @@ export default function UserManagementPage() {
       setNewSupervisedSubjects([]);
       setNewTeaches(false);
     }
+    // Clear any secondary role that matches the new primary role
+    setNewSecondaryRoles((prev) => prev.filter((r) => r !== newRole));
   }, [newRole]);
 
   // CSV bulk upload state
@@ -271,6 +275,9 @@ export default function UserManagementPage() {
     try {
       const headers = await getAuthHeaders();
       const payload: Record<string, unknown> = { email, role: newRole };
+      if (newSecondaryRoles.length > 0) {
+        payload.secondary_roles = newSecondaryRoles;
+      }
       if (isMajorScoped && newMajor) {
         payload.assigned_major = newMajor;
       }
@@ -300,6 +307,7 @@ export default function UserManagementPage() {
       }
       setSuccess(msg);
       setEmail("");
+      setNewSecondaryRoles([]);
       setNewMajor("");
       setNewSupervisedClasses([]);
       setNewSupervisedSubjects([]);
@@ -309,6 +317,34 @@ export default function UserManagementPage() {
       setError(err instanceof Error ? err.message : "Failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleUpdateMajor(uid: string, major: string) {
+    setError(null);
+    const currentUser = users.find((u) => u.uid === uid);
+    if (!currentUser) return;
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          uid,
+          role: currentUser.role,
+          assigned_major: major || null,
+          supervised_classes: currentUser.supervised_classes ?? [],
+          supervised_subjects: currentUser.supervised_subjects ?? [],
+          teaches: currentUser.teaches ?? false,
+          secondary_roles: currentUser.secondary_roles ?? [],
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update major");
+      setUsers((prev) =>
+        prev.map((u) => (u.uid === uid ? { ...u, assigned_major: major || undefined } : u))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed");
     }
   }
 
@@ -408,6 +444,30 @@ export default function UserManagementPage() {
               <Button type="submit" disabled={saving}>
                 {saving ? "Saving…" : t("save" as never) || "Save"}
               </Button>
+            </div>
+
+            {/* ── Secondary Roles ── */}
+            <div className="rounded-md border bg-muted/30 p-3">
+              <p className="text-sm font-medium mb-2">Secondary Roles <span className="text-muted-foreground font-normal">(optional extra permissions)</span></p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {(Object.entries(ROLES) as [Role, string][]).filter(([key]) => key !== "super_admin" && key !== newRole).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newSecondaryRoles.includes(key)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setNewSecondaryRoles((prev) => [...prev, key]);
+                        } else {
+                          setNewSecondaryRoles((prev) => prev.filter((r) => r !== key));
+                        }
+                      }}
+                      className="rounded"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
             </div>
 
             {/* ── Scoping fields for major-scoped roles ── */}
@@ -716,6 +776,7 @@ export default function UserManagementPage() {
                   <TableHead>Email / UID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Major</TableHead>
                   <TableHead>Scope</TableHead>
                   <TableHead className="w-20">Actions</TableHead>
                 </TableRow>
@@ -758,10 +819,33 @@ export default function UserManagementPage() {
                       </select>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {u.assigned_major === "0021-01" ? "Boys" : u.assigned_major === "0021-02" ? "Girls" : "—"}
-                      {u.supervised_classes?.length ? ` · ${u.supervised_classes.length} classes` : ""}
-                      {u.supervised_subjects?.length ? ` · ${u.supervised_subjects.length} subjects` : ""}
-                      {u.teaches ? " · teaches" : ""}
+                      <select
+                        value={u.assigned_major ?? ""}
+                        onChange={(e) => handleUpdateMajor(u.uid, e.target.value)}
+                        className="h-7 rounded-md border bg-background px-2 text-xs"
+                      >
+                        <option value="">Unassigned</option>
+                        <option value="0021-01">Boys&apos; School</option>
+                        <option value="0021-02">Girls&apos; School</option>
+                      </select>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <div className="space-y-0.5">
+                        <div>
+                          {u.supervised_classes?.length ? ` · ${u.supervised_classes.length} classes` : ""}
+                          {u.supervised_subjects?.length ? ` · ${u.supervised_subjects.length} subjects` : ""}
+                          {u.teaches ? " · teaches" : ""}
+                        </div>
+                        {u.secondary_roles && u.secondary_roles.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {u.secondary_roles.map((sr) => (
+                              <span key={sr} className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">
+                                +{ROLES[sr] ?? sr}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Button

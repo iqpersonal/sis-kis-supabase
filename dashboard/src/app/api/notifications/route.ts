@@ -17,12 +17,13 @@ import { verifyAuth } from "@/lib/api-auth";
 
 interface Notification {
   id: string;
-  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info";
+  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info" | "store_low_stock" | "store_out_of_stock";
   severity: "critical" | "warning" | "info";
   title: string;
   message: string;
   student_number?: string;
   student_name?: string;
+  store_type?: "general" | "it";
   created_at: string;
   read: boolean;
 }
@@ -37,6 +38,9 @@ function invalidateNotifCache() {
 
 // ── GET ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  const auth = await verifyAuth(req);
+  if (!auth.ok) return auth.response;
+
   const limitParam = parseInt(req.nextUrl.searchParams.get("limit") || "100");
   const unreadOnly = req.nextUrl.searchParams.get("unreadOnly") === "true";
   const yearParam = req.nextUrl.searchParams.get("year");
@@ -46,6 +50,11 @@ export async function GET(req: NextRequest) {
     const notifications: Notification[] = [];
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
+    const userDoc = await adminDb.collection("admin_users").doc(auth.uid).get();
+    const secondaryRoles = userDoc.exists && Array.isArray(userDoc.data()?.secondary_roles)
+      ? (userDoc.data()?.secondary_roles as string[])
+      : [];
+    const roleSet = new Set<string>([auth.role, ...secondaryRoles]);
 
     // ── 1. Check for persisted (manually created) notifications ──
     try {
@@ -277,6 +286,46 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── 4. Targeted operational store notifications ──
+    try {
+      const storeReadSnap = await adminDb.collection("notification_reads").doc(`store_${auth.uid}`).get();
+      const storeReadIds = new Set<string>(storeReadSnap.exists ? storeReadSnap.data()?.ids || [] : []);
+
+      const storeSnap = await adminDb
+        .collection("store_notifications")
+        .where("source", "==", "operational")
+        .orderBy("created_at", "desc")
+        .limit(100)
+        .get();
+
+      for (const doc of storeSnap.docs) {
+        const d = doc.data();
+        if (d.active === false) continue;
+
+        const recipientRoles = Array.isArray(d.recipient_roles) ? d.recipient_roles : [];
+        const recipientUids = Array.isArray(d.recipient_uids) ? d.recipient_uids : [];
+        const matchesRole = recipientRoles.some((role) => roleSet.has(String(role)));
+        const matchesUid = recipientUids.includes(auth.uid);
+        if (!matchesRole && !matchesUid) continue;
+
+        const isRead = storeReadIds.has(doc.id);
+        if (unreadOnly && isRead) continue;
+
+        notifications.push({
+          id: `store:${doc.id}`,
+          type: d.type || "info",
+          severity: d.severity || "info",
+          title: d.title || "",
+          message: d.message || "",
+          store_type: d.store_type === "it" ? "it" : "general",
+          created_at: d.created_at || today,
+          read: isRead,
+        });
+      }
+    } catch (e) {
+      console.warn("Notifications: targeted store query failed:", e);
+    }
+
     // Sort by severity then date
     const severityOrder = { critical: 0, warning: 1, info: 2 };
     notifications.sort((a, b) => {
@@ -311,6 +360,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    const inputIds = Array.isArray(body.ids) ? (body.ids as string[]) : [];
+    const storeIds = inputIds
+      .filter((id) => id.startsWith("store:"))
+      .map((id) => id.slice("store:".length));
+    const ids = inputIds.filter((id) => !id.startsWith("store:"));
 
     if (body.markAllRead) {
       // Mark all auto-generated as read
@@ -326,7 +380,7 @@ export async function POST(req: NextRequest) {
 
       // Also mark auto-generated notifications as read
       // Store all known auto-generated IDs
-      const autoIds: string[] = body.ids || [];
+      const autoIds: string[] = ids;
       if (autoIds.length > 0) {
         const autoRef = adminDb.collection("notification_reads").doc("auto");
         const existing = await autoRef.get();
@@ -337,13 +391,22 @@ export async function POST(req: NextRequest) {
         batch.set(autoRef, { ids: merged, updated_at: new Date().toISOString() });
       }
 
+      if (storeIds.length > 0) {
+        const storeRef = adminDb.collection("notification_reads").doc(`store_${auth.uid}`);
+        const existing = await storeRef.get();
+        const currentIds: string[] = existing.exists
+          ? existing.data()?.ids || []
+          : [];
+        const merged = [...new Set([...currentIds, ...storeIds])];
+        batch.set(storeRef, { ids: merged, updated_at: new Date().toISOString() });
+      }
+
       await batch.commit();
       return NextResponse.json({ success: true });
     }
 
     // Mark specific IDs as read
-    const { ids } = body as { ids: string[] };
-    if (!ids || ids.length === 0) {
+    if (ids.length === 0 && storeIds.length === 0) {
       return NextResponse.json({ error: "ids required" }, { status: 400 });
     }
 
@@ -366,6 +429,19 @@ export async function POST(req: NextRequest) {
         : [];
       const merged = [...new Set([...currentIds, ...autoIds])];
       batch.set(autoRef, {
+        ids: merged,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (storeIds.length > 0) {
+      const storeRef = adminDb.collection("notification_reads").doc(`store_${auth.uid}`);
+      const existing = await storeRef.get();
+      const currentIds: string[] = existing.exists
+        ? existing.data()?.ids || []
+        : [];
+      const merged = [...new Set([...currentIds, ...storeIds])];
+      batch.set(storeRef, {
         ids: merged,
         updated_at: new Date().toISOString(),
       });

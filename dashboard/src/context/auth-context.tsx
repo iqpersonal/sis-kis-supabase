@@ -19,7 +19,7 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, limit, getDocs } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebase";
 import type { Role, Permission } from "@/lib/rbac";
 import { ROLE_PERMISSIONS, hasPermission, MAJOR_SCOPED_ROLES } from "@/lib/rbac";
@@ -27,6 +27,7 @@ import { ROLE_PERMISSIONS, hasPermission, MAJOR_SCOPED_ROLES } from "@/lib/rbac"
 interface AuthCtx {
   user: User | null;
   role: Role | null;
+  secondaryRoles: Role[];
   assignedMajor: string | null;
   supervisedClasses: string[];
   supervisedSubjects: string[];
@@ -41,6 +42,7 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx>({
   user: null,
   role: null,
+  secondaryRoles: [],
   assignedMajor: null,
   supervisedClasses: [],
   supervisedSubjects: [],
@@ -55,6 +57,7 @@ const AuthContext = createContext<AuthCtx>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [secondaryRoles, setSecondaryRoles] = useState<Role[]>([]);
   const [assignedMajor, setAssignedMajor] = useState<string | null>(null);
   const [supervisedClasses, setSupervisedClasses] = useState<string[]>([]);
   const [supervisedSubjects, setSupervisedSubjects] = useState<string[]>([]);
@@ -80,21 +83,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (snap.exists()) {
             const data = snap.data();
             setRole(data.role as Role);
+            setSecondaryRoles(
+              Array.isArray(data.secondary_roles)
+                ? (data.secondary_roles as string[]).filter((r) => r in ROLE_PERMISSIONS) as Role[]
+                : []
+            );
             setAssignedMajor(data.assigned_major ?? null);
             setSupervisedClasses(Array.isArray(data.supervised_classes) ? data.supervised_classes : []);
             setSupervisedSubjects(Array.isArray(data.supervised_subjects) ? data.supervised_subjects : []);
             setTeaches(!!data.teaches);
           } else {
-            // No admin_users doc → default to viewer (safe). Super-admin bootstrap happens server-side.
-            setRole("viewer");
-            setAssignedMajor(null);
-            setSupervisedClasses([]);
-            setSupervisedSubjects([]);
-            setTeaches(false);
+            // Fallback for accounts where admin_users doc ID differs from Firebase UID.
+            // Try resolving by email before defaulting to viewer.
+            let emailResolved = false;
+            const normalizedEmail = (u.email || "").trim().toLowerCase();
+            if (normalizedEmail) {
+              const byEmailQ = query(
+                collection(getDb(), "admin_users"),
+                where("email", "==", normalizedEmail),
+                limit(1)
+              );
+              const byEmail = await getDocs(byEmailQ);
+              if (thisRequest !== requestId) return;
+              if (!byEmail.empty) {
+                const data = byEmail.docs[0].data();
+                setRole(data.role as Role);
+                setSecondaryRoles(
+                  Array.isArray(data.secondary_roles)
+                    ? (data.secondary_roles as string[]).filter((r) => r in ROLE_PERMISSIONS) as Role[]
+                    : []
+                );
+                setAssignedMajor(data.assigned_major ?? null);
+                setSupervisedClasses(Array.isArray(data.supervised_classes) ? data.supervised_classes : []);
+                setSupervisedSubjects(Array.isArray(data.supervised_subjects) ? data.supervised_subjects : []);
+                setTeaches(!!data.teaches);
+                emailResolved = true;
+              }
+            }
+
+            if (!emailResolved) {
+              // No admin_users mapping found → default to viewer (safe).
+              setRole("viewer");
+              setSecondaryRoles([]);
+              setAssignedMajor(null);
+              setSupervisedClasses([]);
+              setSupervisedSubjects([]);
+              setTeaches(false);
+            }
           }
         } catch {
           if (thisRequest !== requestId) return;
           setRole("viewer");
+          setSecondaryRoles([]);
           setAssignedMajor(null);
           setSupervisedClasses([]);
           setSupervisedSubjects([]);
@@ -102,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setRole(null);
+        setSecondaryRoles([]);
         setAssignedMajor(null);
         setSupervisedClasses([]);
         setSupervisedSubjects([]);
@@ -126,12 +167,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const can = useCallback((permission: Permission): boolean => {
     if (!role) return false;
-    return hasPermission(role, permission);
-  }, [role]);
+    return hasPermission(role, permission, secondaryRoles);
+  }, [role, secondaryRoles]);
 
   const value = useMemo(() => ({
-    user, role, assignedMajor, supervisedClasses, supervisedSubjects, teaches, loading, signIn, signUp, signOut, can,
-  }), [user, role, assignedMajor, supervisedClasses, supervisedSubjects, teaches, loading, signIn, signUp, signOut, can]);
+    user, role, secondaryRoles, assignedMajor, supervisedClasses, supervisedSubjects, teaches, loading, signIn, signUp, signOut, can,
+  }), [user, role, secondaryRoles, assignedMajor, supervisedClasses, supervisedSubjects, teaches, loading, signIn, signUp, signOut, can]);
 
   return (
     <AuthContext.Provider value={value}>

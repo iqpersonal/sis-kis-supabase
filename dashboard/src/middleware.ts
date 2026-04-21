@@ -39,7 +39,17 @@ export function middleware(request: NextRequest) {
   // Guard /teacher/dashboard routes (teachers)
   else if (pathname.startsWith("/teacher/dashboard")) {
     if (!session) {
-      const loginUrl = new URL("/teacher/login", request.url);
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("redirect", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Guard /staff/dashboard routes (staff)
+  else if (pathname.startsWith("/staff/dashboard")) {
+    if (!session) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);
     }
   }
@@ -57,5 +67,11 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/parent/dashboard/:path*", "/student/dashboard/:path*", "/teacher/dashboard/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/staff/dashboard/:path*",
+    "/parent/dashboard/:path*",
+    "/student/dashboard/:path*",
+    "/teacher/dashboard/:path*",
+  ],
 };

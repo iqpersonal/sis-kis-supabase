@@ -21,12 +21,13 @@ import { useSchoolFilter } from "@/context/school-filter-context";
 
 interface Notification {
   id: string;
-  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info";
+  type: "absence" | "low-grade" | "document-expired" | "document-expiring" | "info" | "store_low_stock" | "store_out_of_stock";
   severity: "critical" | "warning" | "info";
   title: string;
   message: string;
   student_number?: string;
   student_name?: string;
+  store_type?: "general" | "it";
   created_at: string;
   read: boolean;
 }
@@ -36,6 +37,8 @@ const typeIcons: Record<string, React.ElementType> = {
   "low-grade": GraduationCap,
   "document-expired": FileWarning,
   "document-expiring": FileWarning,
+  store_low_stock: Info,
+  store_out_of_stock: AlertTriangle,
   info: Info,
 };
 
@@ -56,6 +59,8 @@ const typeLabels: Record<string, string> = {
   "low-grade": "Academics",
   "document-expired": "Documents",
   "document-expiring": "Documents",
+  store_low_stock: "Store",
+  store_out_of_stock: "Store",
   info: "General",
 };
 
@@ -227,6 +232,10 @@ export default function NotificationsPage() {
                 const Icon = typeIcons[n.type] || Info;
                 const link = n.student_number
                   ? `/dashboard/student/${n.student_number}`
+                  : n.store_type === "it"
+                    ? "/dashboard/it-store"
+                    : n.store_type === "general"
+                      ? "/dashboard/general-store"
                   : n.type === "document-expired" || n.type === "document-expiring"
                     ? "/dashboard/documents"
                     : undefined;

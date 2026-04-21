@@ -2,6 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
+import { useState, useEffect } from "react";
 import { useSummary, type SummarySchoolData } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
@@ -16,8 +17,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SyncStatusBanner } from "@/components/dashboard/sync-status-banner";
 import { StoreDashboard } from "@/components/dashboard/store-dashboard";
+import { LibraryDashboard } from "@/components/dashboard/library-dashboard";
 import { DashboardReportsHub } from "@/components/dashboard/dashboard-reports-hub";
 import { PageTransition } from "@/components/motion";
+import { ACTIVE_PORTAL_KEY } from "@/components/role-switcher";
 
 const STORE_CLERK_SECTIONS = [
   { label: "General Store", apiBase: "/api/general-store", href: "/dashboard/general-store" },
@@ -30,7 +33,13 @@ export default function DashboardOverview() {
   const { selectedYear, selectedLabel, loading: yearLoading } = useAcademicYear();
   const { schoolFilter, schoolLabel } = useSchoolFilter();
   const { t } = useLanguage();
-  const { can, role, loading: authLoading } = useAuth();
+  const { can, role, secondaryRoles, loading: authLoading } = useAuth();
+  const [activePortal, setActivePortal] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(ACTIVE_PORTAL_KEY);
+    setActivePortal(stored);
+  }, []);
 
   // Single Firestore read — pre-aggregated summary document
   const { summary, loading: loadSummary } = useSummary(selectedYear);
@@ -80,12 +89,21 @@ export default function DashboardOverview() {
     );
   }
 
+  // Determine effective role (active portal overrides for scoped roles)
+  const effectiveRole = activePortal && (activePortal === role || secondaryRoles.includes(activePortal as never))
+    ? activePortal
+    : role;
+
   // Store / IT roles: show inventory-only dashboard
-  if (role === "store_clerk") {
+  if (effectiveRole === "store_clerk") {
     return <StoreDashboard sections={STORE_CLERK_SECTIONS} />;
   }
-  if (role === "it_admin") {
+  if (effectiveRole === "it_admin") {
     return <StoreDashboard sections={IT_ADMIN_SECTIONS} />;
+  }
+  // Librarian: show library-only dashboard
+  if (effectiveRole === "librarian") {
+    return <LibraryDashboard />;
   }
 
   if (!summary) {

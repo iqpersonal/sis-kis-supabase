@@ -15,12 +15,34 @@ import {
 import { BarChart3 } from "lucide-react";
 import { LoginLayout } from "@/components/login-layout";
 
+interface InternalAuthResponse {
+  ok: boolean;
+  authMode?: "teacher_local" | "firebase" | "parent_local" | "student_local";
+  target?: string;
+  email?: string;
+  teacher?: {
+    uid: string;
+    email: string;
+    displayName: string;
+    firstName: string;
+    lastName: string;
+    username: string;
+    grade: string;
+    schoolYear: string;
+    role: string;
+    secondary_roles?: string[];
+  };
+  family?: Record<string, unknown>;
+  student?: Record<string, unknown>;
+  error?: string;
+}
+
 export default function LoginPage() {
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center">
-          <div className="animate-pulse text-muted-foreground">Loading…</div>
+          <div className="animate-pulse text-muted-foreground">Loading...</div>
         </div>
       }
     >
@@ -30,14 +52,13 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") ?? "/dashboard";
+  const redirect = searchParams.get("redirect");
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -47,24 +68,71 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        await signUp(email, password);
-      } else {
-        await signIn(email, password);
+      const res = await fetch("/api/internal-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier, password }),
+      });
+
+      const data = (await res.json()) as InternalAuthResponse;
+      if (!res.ok || !data.ok || !data.authMode || !data.target) {
+        setError(data.error || "Authentication failed");
+        return;
       }
-      // Store the Firebase ID token in a session cookie for API route auth
+
+      if (data.authMode === "teacher_local") {
+        if (!data.teacher) {
+          setError("Teacher profile missing");
+          return;
+        }
+
+        localStorage.setItem("teacher_session", JSON.stringify(data.teacher));
+        document.cookie = `__session=teacher; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+        router.push(redirect || data.target);
+        return;
+      }
+
+      if (data.authMode === "parent_local") {
+        if (!data.family) {
+          setError("Parent profile missing");
+          return;
+        }
+        localStorage.setItem("parent_session", JSON.stringify(data.family));
+        document.cookie = `__session=parent; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+        router.push(redirect || data.target!);
+        return;
+      }
+
+      if (data.authMode === "student_local") {
+        if (!data.student) {
+          setError("Student profile missing");
+          return;
+        }
+        localStorage.setItem("student_session", JSON.stringify(data.student));
+        document.cookie = `__session=student; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+        router.push(redirect || data.target!);
+        return;
+      }
+
+      const email = data.email || identifier.trim().toLowerCase();
+      await signIn(email, password);
+
       const { getFirebaseAuth } = await import("@/lib/firebase");
       const idToken = await getFirebaseAuth().currentUser?.getIdToken();
-      if (idToken) {
-        document.cookie = `__session=${idToken}; path=/; max-age=${60 * 60}; SameSite=Lax; Secure`;
-      } else {
-        document.cookie = `__session=1; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+      if (!idToken) {
+        setError("Failed to start session");
+        return;
       }
-      router.push(redirect);
+
+      document.cookie = `__session=${idToken}; path=/; max-age=${60 * 60}; SameSite=Lax; Secure`;
+
+      if (data.teacher && data.target.startsWith("/teacher/dashboard")) {
+        localStorage.setItem("teacher_session", JSON.stringify(data.teacher));
+      }
+
+      router.push(redirect || data.target);
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Authentication failed"
-      );
+      setError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
       setLoading(false);
     }
@@ -72,19 +140,17 @@ function LoginForm() {
 
   return (
     <LoginLayout
-      portalLabel="Admin Dashboard"
-      portalDescription="Access analytics, reports, and manage your school's data from one powerful dashboard."
+      portalLabel="Unified Internal Portal"
+      portalDescription="Use your school username or email to access your assigned portal automatically."
     >
       <Card className="border-0 shadow-xl">
         <CardHeader className="text-center pb-4">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
             <BarChart3 className="h-7 w-7" />
           </div>
-          <CardTitle className="text-2xl font-bold">Smart Report Dashboard</CardTitle>
+          <CardTitle className="text-2xl font-bold">KIS Unified Login</CardTitle>
           <CardDescription>
-            {isSignUp
-              ? "Create an account to get started"
-              : "Sign in to access your reports"}
+            Sign in once and we will route you to the correct dashboard.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -96,15 +162,15 @@ function LoginForm() {
             )}
 
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
+              <label htmlFor="identifier" className="text-sm font-medium">
+                Username or Email
               </label>
               <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                placeholder="username or you@school.edu.sa"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
                 className="h-11"
               />
@@ -117,36 +183,17 @@ function LoginForm() {
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
+                placeholder="********"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
                 className="h-11"
               />
             </div>
 
             <Button type="submit" className="w-full h-11 font-semibold" disabled={loading}>
-              {loading
-                ? "Please wait…"
-                : isSignUp
-                  ? "Create Account"
-                  : "Sign In"}
+              {loading ? "Please wait..." : "Sign In"}
             </Button>
-
-            <p className="text-center text-sm text-muted-foreground">
-              {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-              <button
-                type="button"
-                className="font-medium text-primary underline-offset-4 hover:underline"
-                onClick={() => {
-                  setIsSignUp(!isSignUp);
-                  setError(null);
-                }}
-              >
-                {isSignUp ? "Sign in" : "Sign up"}
-              </button>
-            </p>
           </form>
         </CardContent>
       </Card>

@@ -248,6 +248,8 @@ export interface StoreItem {
   barcode?: string;
   image_url?: string;
   custom_image_url?: string;
+  unit_cost?: number;
+  expiry_date?: string;
   is_active: boolean;
   created_at: string;
   updated_by: string;
@@ -280,7 +282,7 @@ export interface StoreRequest {
 export interface StoreTransaction {
   id: string;
   txn_id: string;
-  type: "receive" | "issue";
+  type: "receive" | "issue" | "adjustment" | "return" | "transfer_out" | "transfer_in";
   item_id: string;
   item_name: string;
   quantity: number;
@@ -288,8 +290,43 @@ export interface StoreTransaction {
   staff_number: string | null;
   staff_name: string | null;
   notes: string;
+  reason?: string;
   performed_by: string;
+  performed_by_name?: string;
   timestamp: string;
+}
+
+/* ── Delivery Notes ──────────────────────────────────────────── */
+
+export type DeliveryNoteStatus = "pending_acknowledgment" | "acknowledged";
+export type ItemCondition = "good" | "damaged" | "partial";
+
+export interface DeliveryNoteItem {
+  item_id: string;
+  item_name: string;
+  quantity: number;
+  condition: ItemCondition;
+  remarks: string;
+}
+
+export interface DeliveryNote {
+  id: string;
+  dn_number: string;
+  store_type: StoreType;
+  branch: string;
+  request_id: string | null;
+  items: DeliveryNoteItem[];
+  issued_by: string;
+  issued_by_name: string;
+  received_by: string;
+  received_by_name: string;
+  received_by_name_ar: string;
+  department: string;
+  status: DeliveryNoteStatus;
+  issued_at: string;
+  acknowledged_at: string | null;
+  notes: string;
+  created_at: string;
 }
 
 /* ── Staff Portal ────────────────────────────────────────────────── */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import {
   Card,
   CardContent,
@@ -56,6 +57,10 @@ import {
   Save,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { useAcademicYear } from "@/context/academic-year-context";
+import { useClassNames } from "@/hooks/use-classes";
+import { useAuth } from "@/context/auth-context";
+import { getDb } from "@/lib/firebase";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -111,13 +116,56 @@ interface LibSettings {
   conditions: string[];
 }
 
+interface StudentLookupResult {
+  student_number: string;
+  student_name: string;
+  family_number?: string;
+  grade?: string;
+  section?: string;
+  school?: string;
+}
+
 const PAGE_SIZE = 15;
+
+const DEFAULT_LIB_SETTINGS: LibSettings = {
+  default_loan_days: 14,
+  max_books_per_student: 3,
+  overdue_fine_per_day: 0,
+  lost_book_fee: 50,
+  grace_period_days: 0,
+  categories: [],
+  conditions: [],
+};
+
+function normalizeLibSettings(value: unknown): LibSettings {
+  const raw = (value ?? {}) as Partial<LibSettings>;
+  return {
+    default_loan_days:
+      typeof raw.default_loan_days === "number" ? raw.default_loan_days : DEFAULT_LIB_SETTINGS.default_loan_days,
+    max_books_per_student:
+      typeof raw.max_books_per_student === "number" ? raw.max_books_per_student : DEFAULT_LIB_SETTINGS.max_books_per_student,
+    overdue_fine_per_day:
+      typeof raw.overdue_fine_per_day === "number" ? raw.overdue_fine_per_day : DEFAULT_LIB_SETTINGS.overdue_fine_per_day,
+    lost_book_fee:
+      typeof raw.lost_book_fee === "number" ? raw.lost_book_fee : DEFAULT_LIB_SETTINGS.lost_book_fee,
+    grace_period_days:
+      typeof raw.grace_period_days === "number" ? raw.grace_period_days : DEFAULT_LIB_SETTINGS.grace_period_days,
+    categories: Array.isArray(raw.categories)
+      ? raw.categories.filter((c): c is string => typeof c === "string")
+      : [],
+    conditions: Array.isArray(raw.conditions)
+      ? raw.conditions.filter((c): c is string => typeof c === "string")
+      : [],
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function LibraryPage() {
+  const { selectedYear } = useAcademicYear();
+  const { assignedMajor } = useAuth();
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [borrowings, setBorrowings] = useState<Borrowing[]>([]);
@@ -141,7 +189,7 @@ export default function LibraryPage() {
     if (res.ok) {
       const data = await res.json();
       setStats(data);
-      if (data.settings) setSettings(data.settings);
+      if (data.settings) setSettings(normalizeLibSettings(data.settings));
     }
   }, []);
 
@@ -165,7 +213,7 @@ export default function LibraryPage() {
 
   const fetchSettings = useCallback(async () => {
     const res = await fetch("/api/library/settings");
-    if (res.ok) setSettings(await res.json());
+    if (res.ok) setSettings(normalizeLibSettings(await res.json()));
   }, []);
 
   useEffect(() => {
@@ -412,6 +460,8 @@ export default function LibraryPage() {
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
         books={books.filter((b) => b.available_copies > 0)}
+        selectedYear={selectedYear}
+        assignedMajor={assignedMajor}
         onSuccess={async () => {
           setCheckoutOpen(false);
           await refreshAll();
@@ -1098,9 +1148,13 @@ function ReportsTab() {
 
 /* ── Settings Tab ── */
 function SettingsTab({ settings, onSave }: { settings: LibSettings; onSave: () => void }) {
-  const [form, setForm] = useState(settings);
+  const [form, setForm] = useState<LibSettings>(normalizeLibSettings(settings));
   const [saving, setSaving] = useState(false);
   const [newCat, setNewCat] = useState("");
+
+  useEffect(() => {
+    setForm(normalizeLibSettings(settings));
+  }, [settings]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -1560,14 +1614,24 @@ function CheckoutDialog({
   onClose,
   books,
   onSuccess,
+  selectedYear,
+  assignedMajor,
 }: {
   open: boolean;
   onClose: () => void;
   books: Book[];
   onSuccess: () => void;
+  selectedYear: string | null;
+  assignedMajor: string | null;
+  assignedMajor: string | null;
 }) {
+  const [studentQuery, setStudentQuery] = useState("");
   const [studentNumber, setStudentNumber] = useState("");
   const [studentName, setStudentName] = useState("");
+  const [studentResults, setStudentResults] = useState<StudentLookupResult[]>([]);
+  const [filterClass, setFilterClass] = useState("");
+  const [filterSection, setFilterSection] = useState("");
+  const [studentLookupError, setStudentLookupError] = useState<string | null>(null);
   const [bookId, setBookId] = useState("");
   const [bookSearch, setBookSearch] = useState("");
   const [dueDate, setDueDate] = useState(() => {
@@ -1577,6 +1641,122 @@ function CheckoutDialog({
   });
   const [saving, setSaving] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
+
+  // Browse-by-class state
+  const [browseClasses, setBrowseClasses] = useState<{ cls: string; sections: string[] }[]>([]);
+  const [browseClass, setBrowseClass] = useState("");
+  const [browseSection, setBrowseSection] = useState("");
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const { classNameMap } = useClassNames();
+  const [classSections, setClassSections] = useState<
+    { classCode: string; sectionCode: string; sectionName: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!open || !selectedYear) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const constraints = [where("Academic_Year", "==", selectedYear)];
+        if (assignedMajor) {
+          constraints.push(where("Major_Code", "==", assignedMajor));
+        }
+
+        const snap = await getDocs(query(collection(getDb(), "sections"), ...constraints));
+        if (cancelled) return;
+
+        const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
+        snap.docs.forEach((doc) => {
+          const data = doc.data();
+          const classCode = String(data.Class_Code || "");
+          const sectionCode = String(data.Section_Code || "");
+          if (!classCode || !sectionCode) return;
+          items.push({
+            classCode,
+            sectionCode,
+            sectionName: String(data.E_Section_Name || data.Section_Code),
+          });
+        });
+
+        setClassSections(items);
+      } catch (err) {
+        console.error("Failed to load section names:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedYear, assignedMajor]);
+
+  const sectionNameMap = useMemo(
+    () =>
+      classSections.reduce<Record<string, string>>((acc, item) => {
+        acc[`${item.classCode}__${item.sectionCode}`] = item.sectionName;
+        return acc;
+      }, {}),
+    [classSections]
+  );
+
+  // Load available classes when dialog opens
+  useEffect(() => {
+    if (!open || !selectedYear) return;
+    void (async () => {
+      const res = await fetch("/api/student-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "browse_options", year: selectedYear, school: assignedMajor || undefined }),
+      }).catch(() => null);
+      if (!res?.ok) return;
+      const data = await res.json() as { classes?: { cls: string; sections: string[] }[] };
+      setBrowseClasses(data.classes ?? []);
+    })();
+  }, [open, selectedYear, assignedMajor]);
+
+  // When class or section browse changes, fetch students
+  useEffect(() => {
+    if (!browseClass || !selectedYear) {
+      if (!browseClass) setStudentResults([]);
+      return;
+    }
+    void (async () => {
+      setBrowseLoading(true);
+      setStudentQuery("");
+      setStudentNumber("");
+      setStudentName("");
+      setStudentLookupError(null);
+      const res = await fetch("/api/student-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "browse",
+          classCode: browseClass,
+          sectionCode: browseSection || "all",
+          year: selectedYear,
+          school: assignedMajor || "all",
+          limit: 200,
+        }),
+      }).catch(() => null);
+      if (res?.ok) {
+        const data = await res.json() as { results?: StudentLookupResult[] };
+        setStudentResults(
+          (data.results ?? []).map((s) => ({
+            student_number: s.student_number,
+            student_name: s.student_name,
+            grade: (s as { latest_class?: string }).latest_class ?? "",
+            section: (s as { latest_section?: string }).latest_section ?? "",
+          }))
+        );
+      }
+      setBrowseLoading(false);
+    })();
+  }, [browseClass, browseSection, selectedYear]);
+
+  const browseSections = useMemo(
+    () => browseClasses.find((c) => c.cls === browseClass)?.sections ?? [],
+    [browseClasses, browseClass]
+  );
 
   const filteredBooks = useMemo(
     () =>
@@ -1591,28 +1771,119 @@ function CheckoutDialog({
     [books, bookSearch]
   );
 
+  // Derive unique class/section options from name-search results (when not browsing)
+  const classOptions = useMemo(() => {
+    if (browseClass) return []; // hide name-search filters when browsing
+    const set = new Set<string>();
+    for (const s of studentResults) if (s.grade) set.add(s.grade);
+    return Array.from(set).sort();
+  }, [studentResults]);
+
+  const sectionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of studentResults)
+      if (s.section && (!filterClass || s.grade === filterClass)) set.add(s.section);
+    return Array.from(set).sort();
+  }, [studentResults, filterClass]);
+
+  const filteredStudentResults = useMemo(() => {
+    return studentResults.filter(
+      (s) =>
+        (!filterClass || s.grade === filterClass) &&
+        (!filterSection || s.section === filterSection)
+    );
+  }, [studentResults, filterClass, filterSection]);
+
   const lookupStudent = async () => {
-    if (!studentNumber) return;
+    const query = studentQuery.trim();
+    if (query.length < 2) {
+      setStudentLookupError("Enter at least 2 characters to search.");
+      setStudentResults([]);
+      setFilterClass("");
+      setFilterSection("");
+      return;
+    }
+
     setLookingUp(true);
+    setStudentLookupError(null);
+    setFilterClass("");
+    setFilterSection("");
     try {
-      const res = await fetch(
-        `/api/student-progress?studentNumber=${studentNumber.trim()}`
-      );
+      if (/^\d+$/.test(query) || /^\d{4}-\d+$/.test(query) || /^0021-/.test(query)) {
+        const exactRes = await fetch(
+          `/api/student-progress?studentNumber=${encodeURIComponent(query)}`
+        );
+
+        if (exactRes.ok) {
+          const exactData = await exactRes.json();
+          const student = {
+            student_number: exactData.data?.student_number || query,
+            student_name:
+              exactData.data?.student_name || exactData.data?.student_name_ar || "",
+            grade: "",
+            section: "",
+            school: "",
+          } satisfies StudentLookupResult;
+
+          setStudentResults([student]);
+          setStudentNumber(student.student_number);
+          setStudentName(student.student_name || "");
+          setStudentQuery(`${student.student_name} (${student.student_number})`);
+          setLookingUp(false);
+          return;
+        }
+      }
+
+      const res = await fetch("/api/student-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, limit: 8 }),
+      });
+
       if (res.ok) {
         const data = await res.json();
-        setStudentName(
-          data.data?.student_name || data.data?.student_name_ar || ""
-        );
+        const results = Array.isArray(data.results)
+          ? (data.results as StudentLookupResult[])
+          : [];
+        setStudentResults(results);
+
+        if (results.length === 1) {
+          const student = results[0];
+          setStudentNumber(student.student_number);
+          setStudentName(student.student_name || "");
+          setStudentQuery(`${student.student_name} (${student.student_number})`);
+        } else {
+          setStudentNumber("");
+          setStudentName("");
+        }
+
+        if (results.length === 0) {
+          setStudentLookupError("No students matched your search.");
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setStudentResults([]);
+        setStudentLookupError(data.error || "Student lookup failed.");
       }
     } catch {
-      // ignore lookup failure
+      setStudentResults([]);
+      setStudentLookupError("Student lookup failed.");
     }
     setLookingUp(false);
   };
 
+  const selectStudent = (student: StudentLookupResult) => {
+    setStudentNumber(student.student_number);
+    setStudentName(student.student_name || "");
+    setStudentQuery(`${student.student_name} (${student.student_number})`);
+    setStudentResults([]);
+    setStudentLookupError(null);
+  };
+
   const handleSubmit = async () => {
-    if (!studentNumber || !bookId || !dueDate) return;
+    if (!studentNumber || !studentName || !bookId || !dueDate) return;
     setSaving(true);
+    setStudentLookupError(null);
     const res = await fetch("/api/library", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1624,14 +1895,20 @@ function CheckoutDialog({
         dueDate: new Date(dueDate).toISOString(),
       }),
     });
+    const data = await res.json().catch(() => ({}));
     setSaving(false);
     if (res.ok) {
+      setStudentQuery("");
       setStudentNumber("");
       setStudentName("");
+      setStudentResults([]);
       setBookId("");
       setBookSearch("");
       onSuccess();
+      return;
     }
+
+    setStudentLookupError(data.error || "Failed to check out book.");
   };
 
   return (
@@ -1645,12 +1922,64 @@ function CheckoutDialog({
         </DialogHeader>
         <div className="grid gap-4">
           <div>
-            <Label>Student Number *</Label>
+            <Label>Student *</Label>
+
+            {/* Browse by class / section */}
+            <div className="mb-2 flex gap-2">
+              <select
+                className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+                value={browseClass}
+                onChange={(e) => {
+                  setBrowseClass(e.target.value);
+                  setBrowseSection("");
+                  setStudentNumber("");
+                  setStudentName("");
+                }}
+              >
+                <option value="">— Browse by Class —</option>
+                {browseClasses.map((c) => (
+                  <option key={c.cls} value={c.cls}>{classNameMap[c.cls] || c.cls}</option>
+                ))}
+              </select>
+              {browseClass && browseSections.length > 0 && (
+                <select
+                  className="flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+                  value={browseSection}
+                  onChange={(e) => {
+                    setBrowseSection(e.target.value);
+                    setStudentNumber("");
+                    setStudentName("");
+                  }}
+                >
+                  <option value="">All Sections</option>
+                  {browseSections.map((s) => (
+                    <option key={s} value={s}>{sectionNameMap[`${browseClass}__${s}`] || s}</option>
+                  ))}
+                </select>
+              )}
+              {browseLoading && <Loader2 className="h-4 w-4 animate-spin self-center" />}
+            </div>
+
+            {/* Name / number search */}
             <div className="flex gap-2">
               <Input
-                value={studentNumber}
-                onChange={(e) => setStudentNumber(e.target.value)}
-                placeholder="e.g. 12345"
+                value={studentQuery}
+                onChange={(e) => {
+                  setStudentQuery(e.target.value);
+                  setStudentNumber("");
+                  setStudentName("");
+                  setStudentLookupError(null);
+                  setFilterClass("");
+                  setFilterSection("");
+                  if (e.target.value === "") setBrowseClass(""); // clear browse when search cleared
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void lookupStudent();
+                  }
+                }}
+                placeholder="Search by student number or name"
               />
               <Button
                 variant="outline"
@@ -1665,10 +1994,58 @@ function CheckoutDialog({
                 )}
               </Button>
             </div>
+            {studentLookupError && (
+              <p className="mt-1 text-sm text-destructive">{studentLookupError}</p>
+            )}
+            {studentResults.length > 0 && classOptions.length > 1 && (
+              <div className="mt-2 flex gap-2">
+                <select
+                  className="flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+                  value={filterClass}
+                  onChange={(e) => { setFilterClass(e.target.value); setFilterSection(""); }}
+                >
+                  <option value="">All Classes</option>
+                  {classOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                {sectionOptions.length > 1 && (
+                  <select
+                    className="flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+                    value={filterSection}
+                    onChange={(e) => setFilterSection(e.target.value)}
+                  >
+                    <option value="">All Sections</option>
+                    {sectionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            {filteredStudentResults.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto rounded-md border">
+                {filteredStudentResults.map((student) => (
+                  <button
+                    key={student.student_number}
+                    type="button"
+                    className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent"
+                    onClick={() => selectStudent(student)}
+                  >
+                    <span className="font-medium">{student.student_name || student.student_number}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {student.student_number}
+                      {student.grade ? ` · ${student.grade}` : ""}
+                      {student.section
+                        ? ` · ${sectionNameMap[`${student.grade || ""}__${student.section}`] || student.section}`
+                        : ""}
+                      {student.school ? ` · ${student.school}` : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             {studentName && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {studentName}
-              </p>
+              <div className="mt-2 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{studentName}</span>
+                <span className="ml-2 font-mono">{studentNumber}</span>
+              </div>
             )}
           </div>
           <div>
@@ -1712,7 +2089,7 @@ function CheckoutDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={saving || !studentNumber || !bookId || !dueDate}
+            disabled={saving || !studentNumber || !studentName || !bookId || !dueDate}
           >
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Check Out

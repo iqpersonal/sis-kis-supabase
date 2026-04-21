@@ -22,6 +22,8 @@ export const ROLES = {
   bookshop: "Bookshop",
   store_clerk: "Store Clerk",
   it_admin: "IT Admin",
+  admissions: "Admissions",
+  librarian: "Librarian",
 } as const;
 
 export type Role = keyof typeof ROLES;
@@ -39,6 +41,7 @@ export const PERMISSIONS = [
   "academics.view",
   "subjects.view",
   "assessments.view",
+  "assessments.manage",
   "progress.view",
   "terms.view",
   "subject_trends.view",
@@ -83,6 +86,9 @@ export const PERMISSIONS = [
   // Quizzes
   "quizzes.view",
   "quizzes.manage",
+  // KG Assessments
+  "kg.view",
+  "kg.manage",
   // Stores
   "general_store.view",
   "general_store.manage",
@@ -94,6 +100,12 @@ export const PERMISSIONS = [
   // Announcements & IT Tickets
   "announcements.manage",
   "tickets.manage",
+  // Admissions
+  "admissions.view",
+  "admissions.manage",
+  "admissions.reports",
+  // Exam Seating
+  "exam_seating.manage",
   // Admin
   "admin.users",
   "admin.audit_log",
@@ -121,7 +133,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "it_store.manage",
     "it_store.request",
     "store_reports.view",
-    "announcements.manage",
     "tickets.manage",
   ],
 
@@ -133,6 +144,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "academics.view",
     "subjects.view",
     "assessments.view",
+    "assessments.manage",
     "progress.view",
     "terms.view",
     "subject_trends.view",
@@ -143,6 +155,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "library.view",
     "analytics.view",
     "quizzes.view",
+    "kg.view",
+    "kg.manage",
+    "exam_seating.manage",
   ],
 
   // Head of Section: view-only, scoped to assigned major + supervised classes
@@ -153,6 +168,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "academics.view",
     "subjects.view",
     "assessments.view",
+    "assessments.manage",
     "progress.view",
     "terms.view",
     "subject_trends.view",
@@ -162,6 +178,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "library.view",
     "analytics.view",
     "quizzes.view",
+    "kg.view",
   ],
 
   // Subject Coordinator: view-only, scoped to assigned major + subjects + classes
@@ -192,31 +209,23 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "at_risk.view",
     "attendance.view",
     "library.view",
-    "notifications.view",
-    "analytics.view",
-    "year_comparison.view",
-    "ai_insights.view",
-    "bulk_export.view",
   ],
 
-  // Finance Officer: fees & delinquency only, can edit fees
+  // Finance Officer: fees & delinquency view-only
   finance: [
     "dashboard.view",
     "fees.view",
-    "fees.edit",
     "delinquency.view",
-    "notifications.view",
-    "bulk_export.view",
   ],
 
-  // Accounts: fees & delinquency read-only, plus documents
+  // Accounts: fees & delinquency read-only, plus store view
   accounts: [
     "dashboard.view",
     "fees.view",
     "delinquency.view",
-    "documents.view",
-    "notifications.view",
-    "bulk_export.view",
+    "general_store.view",
+    "it_store.view",
+    "inventory.view",
   ],
 
   // Registrar: student registration, documents, transfers — no academics/analytics
@@ -229,7 +238,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "transfers.view",
     "transfers.edit",
     "upload.view",
-    "notifications.view",
   ],
 
   teacher: [
@@ -245,6 +253,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "notifications.view",
     "quizzes.view",
     "quizzes.manage",
+    "kg.view",
+    "kg.manage",
   ],
 
   viewer: [
@@ -294,6 +304,18 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "store_reports.view",
     "tickets.manage",
   ],
+
+  admissions: [
+    "dashboard.view",
+    "admissions.view",
+    "admissions.manage",
+    "admissions.reports",
+  ],
+
+  librarian: [
+    "dashboard.view",
+    "library.view",
+  ],
 };
 
 /* ── Route → Permission mapping ──────────────────────────────────  */
@@ -305,6 +327,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/dashboard/academics": "academics.view",
   "/dashboard/subjects": "subjects.view",
   "/dashboard/assessments": "assessments.view",
+  "/dashboard/assessment-setup": "assessments.manage",
   "/dashboard/progress": "progress.view",
   "/dashboard/terms": "terms.view",
   "/dashboard/subject-trends": "subject_trends.view",
@@ -324,6 +347,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/dashboard/compare": "year_comparison.view",
   "/dashboard/ai-insights": "ai_insights.view",
   "/dashboard/transcript-settings": "transcript_settings.view",
+  "/dashboard/academic-year-settings": "transcript_settings.view",
   "/dashboard/upload": "upload.view",
   "/dashboard/admin/users": "admin.users",
   "/dashboard/admin/class-assignment": "admin.users",
@@ -336,31 +360,47 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/dashboard/book-sales": "book_sales.view",
   "/dashboard/diplomas": "certificates.print",
   "/dashboard/quizzes": "quizzes.view",
+  "/dashboard/kg": "kg.view",
   "/dashboard/announcements": "announcements.manage",
   "/dashboard/it-tickets": "tickets.manage",
+  "/dashboard/admissions": "admissions.view",
+  "/dashboard/admissions/enquiries": "admissions.view",
+  "/dashboard/admissions/pipeline": "admissions.manage",
+  "/dashboard/admissions/tests": "admissions.manage",
+  "/dashboard/admissions/interviews": "admissions.manage",
+  "/dashboard/admissions/reports": "admissions.reports",
+  // Exam Seating
+  "/dashboard/admin/exam-seating/halls": "exam_seating.manage",
+  "/dashboard/admin/exam-seating/schedule": "exam_seating.manage",
+  "/dashboard/admin/exam-seating/plan": "exam_seating.manage",
 };
 
 /* ── Helper functions ────────────────────────────────────────────  */
 
 /** Roles that are scoped to a specific major (school branch) */
 export const MAJOR_SCOPED_ROLES: readonly Role[] = [
+  "teacher",
   "academic_director",
   "head_of_section",
   "subject_coordinator",
 ] as const;
 
-export function hasPermission(role: Role, permission: Permission): boolean {
-  return ROLE_PERMISSIONS[role].includes(permission);
+export function hasPermission(role: Role, permission: Permission, secondaryRoles?: Role[]): boolean {
+  if (ROLE_PERMISSIONS[role].includes(permission)) return true;
+  if (secondaryRoles?.length) {
+    return secondaryRoles.some((sr) => ROLE_PERMISSIONS[sr]?.includes(permission));
+  }
+  return false;
 }
 
 export function getPermissionsForRole(role: Role): readonly Permission[] {
   return ROLE_PERMISSIONS[role];
 }
 
-export function canAccessRoute(role: Role, pathname: string): boolean {
+export function canAccessRoute(role: Role, pathname: string, secondaryRoles?: Role[]): boolean {
   // Exact match first
   const perm = ROUTE_PERMISSIONS[pathname];
-  if (perm) return hasPermission(role, perm);
+  if (perm) return hasPermission(role, perm, secondaryRoles);
 
   // Check parent route (e.g., /dashboard/students/12345 → /dashboard/students)
   const segments = pathname.split("/").filter(Boolean);
@@ -368,9 +408,9 @@ export function canAccessRoute(role: Role, pathname: string): boolean {
     segments.pop();
     const parent = "/" + segments.join("/");
     const parentPerm = ROUTE_PERMISSIONS[parent];
-    if (parentPerm) return hasPermission(role, parentPerm);
+    if (parentPerm) return hasPermission(role, parentPerm, secondaryRoles);
   }
 
   // Default: allow dashboard.view for any unmatched /dashboard route
-  return hasPermission(role, "dashboard.view");
+  return hasPermission(role, "dashboard.view", secondaryRoles);
 }

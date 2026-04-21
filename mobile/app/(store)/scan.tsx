@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Keyboard } from "react-native";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, Keyboard, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAuth, getStoreAccess } from "@/context/auth-context";
 import { useBarcodeSearch } from "@/hooks/use-store-data";
@@ -27,6 +28,33 @@ export default function ScanScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ mode?: string; store?: string }>();
   const isQuickIssue = params.mode === "quick-issue";
+  const searchingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchStuck, setSearchStuck] = useState(false);
+
+  /* Reset state every time screen comes into focus (e.g. after navigating back) */
+  useFocusEffect(
+    useCallback(() => {
+      setLastScanned("");
+      setManualEntry(false);
+      setManualBarcode("");
+      setSearchStuck(false);
+      consecutiveRef.current = { value: "", count: 0 };
+      lastScanTime.current = 0;
+    }, [])
+  );
+
+  /* Safety timeout: if searching hangs for >5s, unblock the camera */
+  useEffect(() => {
+    if (searching) {
+      searchingTimeout.current = setTimeout(() => setSearchStuck(true), 5000);
+    } else {
+      setSearchStuck(false);
+      if (searchingTimeout.current) clearTimeout(searchingTimeout.current);
+    }
+    return () => {
+      if (searchingTimeout.current) clearTimeout(searchingTimeout.current);
+    };
+  }, [searching]);
 
   const lookupBarcode = useCallback(
     async (data: string) => {
@@ -158,7 +186,7 @@ export default function ScanScreen() {
         barcodeScannerSettings={{
           barcodeTypes: ["qr", "ean13", "ean8", "upc_a", "upc_e", "code128", "code39"],
         }}
-        onBarcodeScanned={searching ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={(searching && !searchStuck) ? undefined : handleBarCodeScanned}
       />
 
       {/* Overlay */}
@@ -173,9 +201,15 @@ export default function ScanScreen() {
 
         {/* Scan frame */}
         <View style={styles.frameContainer}>
-          <View style={styles.frame} />
+          <View style={styles.frame}>
+            {searching && !searchStuck && (
+              <View style={styles.scanningOverlay}>
+                <ActivityIndicator size="large" color={colors.primary} />
+              </View>
+            )}
+          </View>
           <Text style={styles.hint}>
-            {searching ? "Searching..." : "Point camera at a barcode or QR code"}
+            {searching && !searchStuck ? "Searching..." : "Point camera at a barcode or QR code"}
           </Text>
         </View>
 
@@ -260,6 +294,15 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     borderRadius: radius.lg,
     backgroundColor: "transparent",
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    overflow: "hidden" as const,
+  },
+  scanningOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
   },
   hint: {
     fontSize: fontSize.sm,

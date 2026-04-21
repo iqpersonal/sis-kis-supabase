@@ -67,6 +67,7 @@ export default function TeacherHomePage() {
   const totalStudents = classes.reduce((sum, c) => sum + c.studentCount, 0);
   const uniqueSubjects = [...new Set(classes.map((c) => c.subject).filter(Boolean))];
   const uniqueClasses = [...new Set(classes.map((c) => `${c.className}-${c.section}`))];
+  const activeYear = classes.length > 0 ? classes[0].year : "";
 
   return (
     <div className="space-y-6">
@@ -75,7 +76,14 @@ export default function TeacherHomePage() {
         <h1 className="text-2xl font-bold">
           {t("welcome")}, {teacher.displayName}
         </h1>
-        <p className="text-muted-foreground">{t("teacherDashboardDesc")}</p>
+        <p className="text-muted-foreground">
+          {t("teacherDashboardDesc")}
+          {activeYear && (
+            <span className="ml-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/20 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-500/30">
+              {activeYear}
+            </span>
+          )}
+        </p>
       </div>
 
       {/* KPI Cards */}
@@ -157,7 +165,7 @@ export default function TeacherHomePage() {
                         <button
                           onClick={() =>
                             router.push(
-                              `/teacher/dashboard/attendance?class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}`
+                              `/teacher/dashboard/attendance?classId=${encodeURIComponent(c.id)}&class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&year=${encodeURIComponent(c.year || "")}`
                             )
                           }
                           className="text-xs text-blue-600 hover:underline mr-3"
@@ -167,7 +175,7 @@ export default function TeacherHomePage() {
                         <button
                           onClick={() =>
                             router.push(
-                              `/teacher/dashboard/grades?class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&subject=${encodeURIComponent(c.subject)}`
+                              `/teacher/dashboard/grades?classId=${encodeURIComponent(c.id)}&class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&subject=${encodeURIComponent(c.subject)}&year=${encodeURIComponent(c.year || "")}`
                             )
                           }
                           className="text-xs text-blue-600 hover:underline"

@@ -19,6 +19,7 @@ export interface TeacherProfile {
   grade: string;
   schoolYear: string;
   role: string;
+  secondary_roles?: string[];
 }
 
 interface TeacherAuthCtx {

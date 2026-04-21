@@ -73,7 +73,7 @@ export default function VerifyPage() {
         <img
           src="/kis-logo.png"
           alt="KIS"
-          style={{ height: 72, margin: "0 auto 12px" }}
+          style={{ height: 72, width: "auto", margin: "0 auto 12px" }}
         />
         <h1
           style={{

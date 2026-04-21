@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { RoleSwitcher } from "@/components/role-switcher";
 import { cn } from "@/lib/utils";
 import type { TranslationKeys } from "@/lib/i18n/translations";
 import {
@@ -24,6 +25,7 @@ import {
   LogOut,
   NotebookPen,
   Menu,
+  ShoppingCart,
 } from "lucide-react";
 
 const NAV: { href: string; labelKey: TranslationKeys; icon: React.ElementType }[] = [
@@ -35,6 +37,7 @@ const NAV: { href: string; labelKey: TranslationKeys; icon: React.ElementType }[
   { href: "/teacher/dashboard/quizzes", labelKey: "teacherQuestionBank" as TranslationKeys, icon: HelpCircle },
   { href: "/teacher/dashboard/quiz-assign", labelKey: "teacherQuizAssign" as TranslationKeys, icon: FileText },
   { href: "/teacher/dashboard/quiz-results", labelKey: "teacherQuizResults" as TranslationKeys, icon: BarChart3 },
+  { href: "/teacher/dashboard/store", labelKey: "teacherStore" as TranslationKeys, icon: ShoppingCart },
 ];
 
 function SidebarContent({
@@ -179,6 +182,10 @@ export default function TeacherDashboardLayout({
           </Sheet>
 
           <div className="flex-1" />
+          <RoleSwitcher
+            primaryRole="teacher"
+            secondaryRoles={teacher?.secondary_roles ?? []}
+          />
           <ThemeToggle />
           <LanguageSwitcher variant="icon" />
         </header>

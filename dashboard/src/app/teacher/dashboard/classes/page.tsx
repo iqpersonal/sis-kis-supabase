@@ -140,7 +140,7 @@ export default function TeacherClassesPage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       router.push(
-                        `/teacher/dashboard/attendance?class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}`
+                        `/teacher/dashboard/attendance?classId=${encodeURIComponent(c.id)}&class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&year=${encodeURIComponent(c.year || "")}`
                       );
                     }}
                   >
@@ -154,7 +154,7 @@ export default function TeacherClassesPage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       router.push(
-                        `/teacher/dashboard/grades?class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&subject=${encodeURIComponent(c.subject)}`
+                        `/teacher/dashboard/grades?classId=${encodeURIComponent(c.id)}&class=${encodeURIComponent(c.className)}&section=${encodeURIComponent(c.section)}&subject=${encodeURIComponent(c.subject)}&year=${encodeURIComponent(c.year || "")}`
                       );
                     }}
                   >

@@ -48,7 +48,7 @@ export function CategoryPieChart({ reports }: Props) {
       </CardHeader>
       <CardContent>
         <div className="h-[300px]" style={{ minWidth: 0, minHeight: 300 }}>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
             <PieChart>
               <Pie
                 data={data}

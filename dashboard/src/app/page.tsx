@@ -150,22 +150,12 @@ export default function LandingPage() {
                 Dashboard
               </Link>
             ) : (
-              <>
-                <Link
-                  href="/parent/login"
-                  className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white/80 transition hover:text-white hover:bg-white/10"
-                >
-                  <Users className="h-4 w-4" />
-                  Parent Login
-                </Link>
-                <Link
-                  href="/student/login"
-                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#6366f1] to-[#4f46e5] px-5 py-2 text-sm font-semibold shadow-lg shadow-indigo-500/25 transition hover:shadow-indigo-500/40"
-                >
-                  <GraduationCap className="h-4 w-4" />
-                  Student Login
-                </Link>
-              </>
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#6366f1] to-[#4f46e5] px-5 py-2 text-sm font-semibold shadow-lg shadow-indigo-500/25 transition hover:shadow-indigo-500/40"
+              >
+                Sign In
+              </Link>
             )}
           </div>
 
@@ -186,12 +176,9 @@ export default function LandingPage() {
             <a href="#programs" onClick={() => setMobileNav(false)} className="block text-sm text-white/70 hover:text-white">Programs</a>
             <a href="#platforms" onClick={() => setMobileNav(false)} className="block text-sm text-white/70 hover:text-white">Platforms</a>
             <a href="#contact" onClick={() => setMobileNav(false)} className="block text-sm text-white/70 hover:text-white">Contact</a>
-            <div className="border-t border-white/10 pt-3 space-y-2">
-              <Link href="/parent/login" onClick={() => setMobileNav(false)} className="flex items-center gap-2 text-sm text-white/70 hover:text-white">
-                <Users className="h-4 w-4" />Parent Login
-              </Link>
-              <Link href="/student/login" onClick={() => setMobileNav(false)} className="flex items-center gap-2 text-sm text-white/70 hover:text-white">
-                <GraduationCap className="h-4 w-4" />Student Login
+            <div className="border-t border-white/10 pt-3">
+              <Link href="/login" onClick={() => setMobileNav(false)} className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#6366f1] to-[#4f46e5] px-4 py-2 text-sm font-semibold">
+                Sign In
               </Link>
             </div>
           </div>
@@ -623,11 +610,8 @@ export default function LandingPage() {
               <a href="#contact" className="hover:text-white/70 transition-colors">Contact</a>
               <a href="https://kis-riyadh.com" target="_blank" rel="noopener noreferrer" className="hover:text-white/70 transition-colors">School Website</a>
               <span className="hidden md:inline text-white/15">|</span>
-              <Link href="/teacher/login" className="inline-flex items-center gap-1 hover:text-white/70 transition-colors">
-                <BookOpen className="h-3 w-3" />Teacher Login
-              </Link>
               <Link href="/login" className="inline-flex items-center gap-1 hover:text-white/70 transition-colors">
-                <Shield className="h-3 w-3" />Admin Sign In
+                <Shield className="h-3 w-3" />Sign In
               </Link>
             </div>
           </div>

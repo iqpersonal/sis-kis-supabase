@@ -315,7 +315,7 @@ export function NationalityReport() {
       {/* Chart */}
       {chartData.length > 0 && (
         <div className="h-[350px]" style={{ minWidth: 0, minHeight: 350 }}>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
             {chartType === "pie" ? (
               <PieChart>
                 <Pie

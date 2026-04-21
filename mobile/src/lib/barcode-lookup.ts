@@ -1,7 +1,9 @@
 /**
- * Barcode product lookup using multiple free APIs + web scraping + Gemini AI.
+ * Barcode product lookup using multiple free APIs + web scraping + Gemini AI
+ * + Google Custom Search for product images.
  * Tries: Open Food Facts, UPC ItemDB, Open Beauty Facts,
  *        Open Pet Food Facts, Go-UPC (web scrape), then Gemini AI as smart fallback.
+ * Image search: Gemini (Google Search grounding) → Google Custom Search API.
  * Also provides image upload and Google search helpers.
  */
 import { auth } from "./firebase";
@@ -10,6 +12,15 @@ import * as FileSystem from "expo-file-system/legacy";
 const STORAGE_BUCKET = "sis-kis.firebasestorage.app";
 
 const GEMINI_API_KEY = "AIzaSyCylvB4JTxZhaUSK4vAUwwlrCHOYAmB2gQ";
+
+/**
+ * Google Custom Search API — for reliable product image lookup.
+ * Setup: 1) Go to https://programmablesearchengine.google.com → Create engine → Search entire web → Copy CX ID
+ *        2) Enable "Custom Search API" in Google Cloud Console (same project as Gemini key)
+ *        3) Paste the CX ID below.
+ * Free tier: 100 queries/day — only called when adding NEW items (not every scan).
+ */
+const GOOGLE_CSE_CX = "57b367424eddd408d";  // Product Images search engine
 
 /**
  * Normalize a barcode to a canonical form so the same physical barcode
@@ -300,13 +311,15 @@ async function tryGemini(barcode: string): Promise<BarcodeProduct | null> {
 
     const prompt = `I scanned a product barcode: ${barcode}
 
-Identify this product. Return ONLY a JSON object (no markdown, no code fences) with these fields:
-- "name": product name in English (required)
+Identify this product. It could be from any category — IT supplies (HP/Canon/Brother toner cartridges, ink, cables, adapters, USB drives, mice, keyboards), stationery (pens, notebooks, folders, tape, staplers, markers), office supplies, electronics, food, cosmetics, or anything else.
+
+Return ONLY a JSON object (no markdown, no code fences) with these fields:
+- "name": product name in English — include brand and model number if known (required)
 - "name_ar": product name in Arabic if known (optional)  
 - "brand": brand name (optional)
-- "category": product category like "Electronics", "Shoes", "Stationery", "Food", etc. (optional)
+- "category": product category like "IT Supplies", "Toner", "Stationery", "Electronics", "Office Supplies", "Food", etc. (optional)
 - "description": brief 1-2 sentence product description (optional)
-- "image_url": a direct URL to a product image if you know one (optional, must be a real working https URL to a .jpg/.png/.webp image)
+- "image_url": a direct URL to a product image if you know one (optional, must be a real working https URL to a .jpg/.png/.webp image — manufacturer or major retailer product pages preferred)
 
 If you cannot identify this barcode at all, return exactly: {"name":""}`;
 
@@ -345,10 +358,14 @@ If you cannot identify this barcode at all, return exactly: {"name":""}`;
       image_url = undefined;
     }
 
-    // If Gemini didn't return a valid image, try to find one via Google Search grounding
+    // If Gemini didn't return a valid image, try multiple image search strategies
     if (!image_url && parsed.name) {
       try {
-        image_url = await findProductImage(parsed.name, barcode);
+        // Build a rich search query with brand + name for better results
+        const searchName = parsed.brand
+          ? `${parsed.brand} ${parsed.name}`
+          : parsed.name;
+        image_url = await findProductImage(searchName, barcode);
       } catch { /* no image — fine */ }
     }
 
@@ -367,8 +384,29 @@ If you cannot identify this barcode at all, return exactly: {"name":""}`;
 
 /**
  * Use Gemini with Google Search grounding to find a real product image URL.
+ * Enhanced for IT supplies, toners, stationery, and office products.
  */
 async function findProductImage(productName: string, barcode: string): Promise<string | undefined> {
+  // Try multiple strategies in sequence
+  const strategies = [
+    () => tryGeminiImageSearch(productName, barcode),
+    () => tryGoogleCustomSearchImage(`${productName} product`),
+    () => tryGoogleCustomSearchImage(`${productName} ${barcode}`),
+  ];
+
+  for (const strategy of strategies) {
+    try {
+      const url = await strategy();
+      if (url) return url;
+    } catch { /* try next */ }
+  }
+  return undefined;
+}
+
+/**
+ * Use Gemini with Google Search grounding to find a product image.
+ */
+async function tryGeminiImageSearch(productName: string, barcode: string): Promise<string | undefined> {
   if (!GEMINI_API_KEY) return undefined;
   try {
     const controller = new AbortController();
@@ -385,8 +423,10 @@ async function findProductImage(productName: string, barcode: string): Promise<s
             {
               parts: [
                 {
-                  text: `Find a real product image URL for: "${productName}" (barcode: ${barcode}). 
-Return ONLY the direct https URL to a .jpg, .png, or .webp product image. No text, no explanation, just the URL.
+                  text: `Find a product image for: "${productName}" (barcode: ${barcode}).
+This could be an IT supply (toner cartridge, ink, cable, adapter), stationery item, office supply, or any other product.
+Look for the official product image from the manufacturer website, Amazon, or a major retailer.
+Return ONLY the direct https URL to a .jpg, .png, or .webp product image file. No text, no explanation, just the URL.
 The URL must be a real, working, direct link to an image file (not a search page or HTML page).
 If you cannot find one, return exactly: NONE`,
                 },
@@ -408,6 +448,59 @@ If you cannot find one, return exactly: NONE`,
     // Extract URL (Gemini might add extra text)
     const urlMatch = text.match(/https:\/\/[^\s"')]+\.(jpg|jpeg|png|webp)/i);
     return urlMatch?.[0] || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Use Google Custom Search API to find product images.
+ * Excellent for IT supplies, toners, stationery — anything Google indexes.
+ * Requires GOOGLE_CSE_CX to be configured.
+ * Free: 100 queries/day.
+ */
+async function tryGoogleCustomSearchImage(query: string): Promise<string | undefined> {
+  if (!GEMINI_API_KEY || !GOOGLE_CSE_CX) return undefined;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const params = new URLSearchParams({
+      key: GEMINI_API_KEY,
+      cx: GOOGLE_CSE_CX,
+      q: query,
+      searchType: "image",
+      num: "5",
+      imgSize: "medium",
+      safe: "active",
+    });
+
+    const res = await fetch(
+      `https://www.googleapis.com/customsearch/v1?${params}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    if (!res.ok) return undefined;
+    const data = await res.json();
+
+    // Find the first image that looks like a real product photo
+    for (const item of (data.items || [])) {
+      const url: string = item.link;
+      if (
+        url &&
+        url.startsWith("https://") &&
+        /\.(jpg|jpeg|png|webp)/i.test(url) &&
+        !url.includes("placeholder") &&
+        !url.includes("no-image")
+      ) {
+        return url;
+      }
+    }
+    // Fallback to thumbnail
+    const thumb = data.items?.[0]?.image?.thumbnailLink;
+    if (thumb?.startsWith("https://")) return thumb;
+    return undefined;
   } catch {
     return undefined;
   }

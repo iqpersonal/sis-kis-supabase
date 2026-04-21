@@ -335,12 +335,36 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const normalizedStudentNumber = String(studentNumber).trim();
+      const studentSnap = await adminDb
+        .collection("student_progress")
+        .doc(normalizedStudentNumber)
+        .get();
+
+      if (!studentSnap.exists) {
+        return NextResponse.json(
+          { error: "Student not found. Search and select a valid student before checkout." },
+          { status: 404 }
+        );
+      }
+
+      const studentData = studentSnap.data() ?? {};
+      const canonicalStudentName =
+        String(studentData.student_name || studentData.student_name_ar || studentName || "").trim();
+
+      if (!canonicalStudentName) {
+        return NextResponse.json(
+          { error: "Student record is missing a usable name." },
+          { status: 400 }
+        );
+      }
+
       const settings = await getSettings();
 
       // Enforce borrowing limit
       const activeSnap = await adminDb
         .collection("library_borrowings")
-        .where("student_number", "==", String(studentNumber).trim())
+        .where("student_number", "==", normalizedStudentNumber)
         .where("status", "in", ["borrowed", "overdue"])
         .count()
         .get();
@@ -399,8 +423,8 @@ export async function POST(req: NextRequest) {
       // Create borrowing record
       const borrowRef = adminDb.collection("library_borrowings").doc();
       batch.set(borrowRef, {
-        student_number: String(studentNumber).trim(),
-        student_name: studentName || "",
+        student_number: normalizedStudentNumber,
+        student_name: canonicalStudentName,
         book_id: bookId,
         book_title: bookData.title || "",
         book_title_ar: bookData.title_ar || "",
@@ -428,7 +452,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         borrowingId: borrowRef.id,
-        message: `Checked out "${bookData.title}" to student ${studentNumber}`,
+        message: `Checked out "${bookData.title}" to ${canonicalStudentName}`,
       });
     }
 

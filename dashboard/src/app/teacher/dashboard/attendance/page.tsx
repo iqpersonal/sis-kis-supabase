@@ -41,8 +41,10 @@ function TeacherAttendancePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const classIdParam = searchParams.get("classId") || "";
   const classParam = searchParams.get("class") || "";
   const sectionParam = searchParams.get("section") || "";
+  const yearParam = searchParams.get("year") || "";
 
   const [students, setStudents] = useState<StudentInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,8 +58,11 @@ function TeacherAttendancePage() {
     setLoading(true);
 
     try {
-      const params = new URLSearchParams({ class: classParam });
+      const params = new URLSearchParams();
+      if (classIdParam) params.set("classId", classIdParam);
+      params.set("class", classParam);
       if (sectionParam) params.set("section", sectionParam);
+      if (yearParam) params.set("year", yearParam);
 
       const res = await fetch(`/api/teacher/students?${params}`);
       const data = await res.json();
@@ -74,7 +79,7 @@ function TeacherAttendancePage() {
       setStudents([]);
     }
     setLoading(false);
-  }, [classParam, sectionParam]);
+  }, [classIdParam, classParam, sectionParam, yearParam]);
 
   // Fetch existing attendance for the selected date
   const fetchExisting = useCallback(async () => {

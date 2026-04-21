@@ -32,7 +32,7 @@ interface StoreItem {
   name: string;
   category: string;
   unit: string;
-  qty_available: number;
+  quantity: number;
   image_url?: string;
   is_active: boolean;
 }
@@ -136,7 +136,7 @@ export default function StaffStorePage() {
           item_id: item.id,
           item_name: item.name,
           quantity: 1,
-          max: item.qty_available,
+          max: item.quantity,
         },
       ];
     });
@@ -305,7 +305,7 @@ export default function StaffStorePage() {
                           <p className="text-xs">
                             Available:{" "}
                             <span className="font-medium">
-                              {item.qty_available}
+                              {item.quantity}
                             </span>
                           </p>
                         </div>
@@ -328,7 +328,7 @@ export default function StaffStorePage() {
                                 variant="outline"
                                 className="h-7 w-7"
                                 onClick={() => addToCart(item)}
-                                disabled={inCart.quantity >= item.qty_available}
+                                disabled={inCart.quantity >= item.quantity}
                               >
                                 <Plus className="h-3 w-3" />
                               </Button>
@@ -339,7 +339,7 @@ export default function StaffStorePage() {
                               variant="outline"
                               className="h-7 text-xs"
                               onClick={() => addToCart(item)}
-                              disabled={item.qty_available <= 0}
+                              disabled={item.quantity <= 0}
                             >
                               <Plus className="h-3 w-3 mr-1" />
                               Add

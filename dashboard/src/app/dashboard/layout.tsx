@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -65,6 +65,16 @@ import {
   Search,
   Megaphone,
   Headphones,
+  Baby,
+  Bot,
+  ClipboardCheck,
+  Kanban,
+  TestTube,
+  UserCheck,
+  Presentation,
+  LayoutGrid,
+  Calendar,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -77,9 +87,11 @@ import { NotificationBell } from "@/components/dashboard/notification-bell";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
+import { RoleSwitcher, ACTIVE_PORTAL_KEY } from "@/components/role-switcher";
+import { ROLE_PERMISSIONS } from "@/lib/rbac";
 import { useLanguage } from "@/context/language-context";
 import type { TranslationKeys } from "@/lib/i18n/translations";
-import { ROLES, type Permission } from "@/lib/rbac";
+import { ROLES, type Permission, type Role } from "@/lib/rbac";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ── Grouped Navigation ─────────────────────────────────── */
@@ -119,9 +131,17 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/dashboard/academics", labelKey: "navAcademics", icon: GraduationCap, permission: "academics.view" },
       { href: "/dashboard/subjects", labelKey: "navSubjectPerformance", icon: BookOpen, permission: "subjects.view" },
       { href: "/dashboard/assessments", labelKey: "navAssessments", icon: ClipboardList, permission: "assessments.view" },
+      { href: "/dashboard/assessment-setup", labelKey: "navAssessmentSetup" as TranslationKeys, icon: SlidersHorizontal, permission: "assessments.manage" as Permission },
       { href: "/dashboard/terms", labelKey: "navTermProgress", icon: CalendarRange, permission: "terms.view" },
       { href: "/dashboard/subject-trends", labelKey: "navSubjectTrends", icon: TrendingUp, permission: "subject_trends.view" },
       { href: "/dashboard/quizzes", labelKey: "navQuizzes" as TranslationKeys, icon: HelpCircle, permission: "quizzes.view" as Permission },
+    ],
+  },
+  {
+    label: "Kindergarten",
+    items: [
+      { href: "/dashboard/kg", labelKey: "navKG" as TranslationKeys, icon: Baby, permission: "kg.view" as Permission },
+      { href: "/dashboard/kg/reports", labelKey: "navKGReports" as TranslationKeys, icon: FileText, permission: "kg.view" as Permission },
     ],
   },
   {
@@ -150,6 +170,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/dashboard/notifications", labelKey: "navNotifications", icon: BellRing, permission: "notifications.view" },
       { href: "/dashboard/messages", labelKey: "navMessages" as TranslationKeys, icon: MessageSquare, permission: "notifications.view" },
       { href: "/dashboard/whatsapp", labelKey: "navWhatsApp" as TranslationKeys, icon: Phone, permission: "notifications.view" },
+      { href: "/dashboard/whatsapp-logs", labelKey: "navWhatsAppLogs" as TranslationKeys, icon: Bot, permission: "notifications.view" },
       { href: "/dashboard/contact-updates", labelKey: "navContactUpdates" as TranslationKeys, icon: ClipboardEdit, permission: "notifications.view" },
       { href: "/dashboard/announcements", labelKey: "navAnnouncements" as TranslationKeys, icon: Megaphone, permission: "announcements.manage" as Permission },
     ],
@@ -167,17 +188,33 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: "Admissions",
+    items: [
+      { href: "/dashboard/admissions", labelKey: "navAdmissions" as TranslationKeys, icon: ClipboardCheck, permission: "admissions.view" as Permission },
+      { href: "/dashboard/admissions/enquiries", labelKey: "navAdmissionEnquiries" as TranslationKeys, icon: ClipboardList, permission: "admissions.view" as Permission },
+      { href: "/dashboard/admissions/pipeline", labelKey: "navAdmissionPipeline" as TranslationKeys, icon: Kanban, permission: "admissions.manage" as Permission },
+      { href: "/dashboard/admissions/tests", labelKey: "navAdmissionTests" as TranslationKeys, icon: TestTube, permission: "admissions.manage" as Permission },
+      { href: "/dashboard/admissions/interviews", labelKey: "navAdmissionInterviews" as TranslationKeys, icon: UserCheck, permission: "admissions.manage" as Permission },
+      { href: "/dashboard/admissions/reports", labelKey: "navAdmissionReports" as TranslationKeys, icon: BarChart3, permission: "admissions.reports" as Permission },
+    ],
+  },
+  {
     label: "Admin",
     items: [
       { href: "/dashboard/transcript-settings", labelKey: "navTranscriptSettings", icon: Settings, permission: "transcript_settings.view" },
+      { href: "/dashboard/academic-year-settings", labelKey: "navAcademicYearSettings" as TranslationKeys, icon: CalendarDays, permission: "transcript_settings.view" },
       { href: "/dashboard/upload", labelKey: "navUpload", icon: Upload, permission: "upload.view" },
       { href: "/dashboard/diplomas", labelKey: "navDiplomas" as TranslationKeys, icon: GraduationCap, permission: "certificates.print" as Permission },
       { href: "/dashboard/admin/users", labelKey: "navUserManagement" as TranslationKeys, icon: Users, permission: "admin.users" },
       { href: "/dashboard/admin/class-assignment", labelKey: "navClassAssignment" as TranslationKeys, icon: BookOpen, permission: "admin.users" },
+      { href: "/dashboard/admin/exam-seating/halls", labelKey: "navExamHalls" as TranslationKeys, icon: LayoutGrid, permission: "exam_seating.manage" as Permission },
+      { href: "/dashboard/admin/exam-seating/schedule", labelKey: "navExamSchedule" as TranslationKeys, icon: Calendar, permission: "exam_seating.manage" as Permission },
+      { href: "/dashboard/admin/exam-seating/plan", labelKey: "navExamSeating" as TranslationKeys, icon: Users, permission: "exam_seating.manage" as Permission },
       { href: "/dashboard/audit-log", labelKey: "navAuditLog" as TranslationKeys, icon: Shield, permission: "admin.audit_log" as Permission },
       { href: "/dashboard/staff", labelKey: "navStaffDirectory" as TranslationKeys, icon: Contact, permission: "staff.view" as Permission },
       { href: "/dashboard/it-inventory", labelKey: "navITInventory" as TranslationKeys, icon: Laptop, permission: "inventory.view" as Permission },
       { href: "/dashboard/store-proposal", labelKey: "navStoreProposal" as TranslationKeys, icon: FileText, permission: "admin.users" as Permission },
+      { href: "/dashboard/app-features", labelKey: "navAppFeatures" as TranslationKeys, icon: Presentation, permission: "admin.audit_log" as Permission },
     ],
   },
 ];
@@ -324,8 +361,10 @@ function SidebarContent({
   role,
   years,
   selectedYear,
+  selectedLabel,
   setSelectedYear,
   yearsLoading,
+  yearLocked,
   schoolFilter,
   setSchoolFilter,
   schoolLocked,
@@ -344,8 +383,10 @@ function SidebarContent({
   role: string | null;
   years: string[];
   selectedYear: string | null;
+  selectedLabel: string;
   setSelectedYear: (y: string) => void;
   yearsLoading: boolean;
+  yearLocked: boolean;
   schoolFilter: SchoolFilter;
   setSchoolFilter: (f: SchoolFilter) => void;
   schoolLocked: boolean;
@@ -383,6 +424,11 @@ function SidebarContent({
             <CalendarDays className="h-3 w-3" />
             {t("academicYear")}
           </label>
+          {yearLocked ? (
+            <div className="h-8 w-full rounded-lg bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground flex items-center">
+              {selectedLabel}
+            </div>
+          ) : (
           <select
             value={selectedYear ?? ""}
             onChange={(e) => setSelectedYear(e.target.value)}
@@ -408,22 +454,28 @@ function SidebarContent({
               );
             })}
           </select>
+          )}
         </div>
         <div>
           <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
             <School className="h-3 w-3" />
             {t("school")}
           </label>
+          {schoolLocked ? (
+            <div className="h-8 w-full rounded-lg bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground flex items-center">
+              {schoolFilter === "0021-01" ? t("boysSchool") : schoolFilter === "0021-02" ? t("girlsSchool") : t("allSchools")}
+            </div>
+          ) : (
           <select
             value={schoolFilter}
             onChange={(e) => setSchoolFilter(e.target.value as SchoolFilter)}
-            disabled={schoolLocked}
-            className="h-8 w-full rounded-lg border-0 bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-sidebar-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-8 w-full rounded-lg border-0 bg-sidebar-accent px-2.5 text-xs font-medium text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-sidebar-primary/50"
           >
             <option value="all">{t("allSchools")}</option>
             <option value="0021-01">{t("boysSchool")}</option>
             <option value="0021-02">{t("girlsSchool")}</option>
           </select>
+          )}
         </div>
       </div>
       )}
@@ -531,6 +583,48 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const { user, role, signOut, can } = useAuth();
+  const { secondaryRoles } = useAuth();
+  const [fallbackPrimaryRole, setFallbackPrimaryRole] = useState<Role | null>(null);
+  const [fallbackSecondaryRoles, setFallbackSecondaryRoles] = useState<Role[]>([]);
+  const effectivePrimaryRole = role ?? fallbackPrimaryRole ?? "viewer";
+  const effectiveSecondaryRoles = secondaryRoles.length ? secondaryRoles : fallbackSecondaryRoles;
+  const [activePortalRole, setActivePortalRole] = useState<string | null>(null);
+
+  // Fallback: restore roles from teacher session cache when auth context hasn't loaded them.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("teacher_session");
+      if (!raw) {
+        setFallbackPrimaryRole(null);
+        setFallbackSecondaryRoles([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { role?: string; secondary_roles?: string[] };
+      const parsedRole = parsed.role;
+      const parsedSecondary = Array.isArray(parsed.secondary_roles) ? parsed.secondary_roles : [];
+
+      setFallbackPrimaryRole(
+        parsedRole && parsedRole in ROLE_PERMISSIONS ? (parsedRole as Role) : null
+      );
+      setFallbackSecondaryRoles(
+        parsedSecondary.filter((r): r is Role => r in ROLE_PERMISSIONS)
+      );
+    } catch {
+      setFallbackPrimaryRole(null);
+      setFallbackSecondaryRoles([]);
+    }
+  }, []);
+
+  // Read active portal from localStorage (set by RoleSwitcher)
+  useEffect(() => {
+    const stored = localStorage.getItem(ACTIVE_PORTAL_KEY);
+    // Only apply scoping if the stored role is actually one of the user's secondary roles
+    if (stored && effectiveSecondaryRoles.includes(stored as Role)) {
+      setActivePortalRole(stored);
+    } else {
+      setActivePortalRole(null);
+    }
+  }, [effectiveSecondaryRoles]);
   const router = useRouter();
   const { years, selectedYear, selectedLabel, setSelectedYear, loading: yearsLoading } =
     useAcademicYear();
@@ -545,10 +639,18 @@ export default function DashboardLayout({
   };
 
   // Filter nav groups by user permissions
+  // If a secondary portal is active, scope nav to ONLY that role's permissions
   const filteredGroups = NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter(({ permission }) => can(permission)),
+    items: group.items.filter(({ permission }) => {
+      if (activePortalRole) {
+        return ROLE_PERMISSIONS[activePortalRole as keyof typeof ROLE_PERMISSIONS]?.includes(permission) ?? false;
+      }
+      return can(permission);
+    }),
   })).filter((group) => group.items.length > 0);
+
+  const yearLocked = effectivePrimaryRole === "teacher";
 
   const handleSignOut = async () => {
     await signOut();
@@ -565,8 +667,10 @@ export default function DashboardLayout({
     role,
     years,
     selectedYear,
+    selectedLabel,
     setSelectedYear,
     yearsLoading,
+    yearLocked,
     schoolFilter,
     setSchoolFilter,
     schoolLocked,
@@ -629,6 +733,10 @@ export default function DashboardLayout({
 
           {/* Right actions */}
           <div className="flex items-center gap-1">
+            <RoleSwitcher
+              primaryRole={effectivePrimaryRole}
+              secondaryRoles={effectiveSecondaryRoles}
+            />
             <ThemeToggle />
             <LanguageSwitcher variant="icon" />
             <NotificationBell />

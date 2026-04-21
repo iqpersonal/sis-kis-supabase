@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { uid, role, email, assigned_major, supervised_classes, supervised_subjects, teaches } = body as {
+  const { uid, role, email, assigned_major, supervised_classes, supervised_subjects, teaches, secondary_roles } = body as {
     uid?: string;
     role?: string;
     email?: string;
@@ -73,11 +73,17 @@ export async function POST(req: NextRequest) {
     supervised_classes?: string[];
     supervised_subjects?: string[];
     teaches?: boolean;
+    secondary_roles?: string[];
   };
 
   if (!role || !(role in ROLES)) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
+
+  // Validate and sanitize secondary_roles
+  const validSecondaryRoles = Array.isArray(secondary_roles)
+    ? secondary_roles.filter((r): r is keyof typeof ROLES => r in ROLES && r !== role)
+    : [];
 
   // Build scoping fields for major-scoped roles
   const scopingFields: Record<string, unknown> = {};
@@ -97,7 +103,7 @@ export async function POST(req: NextRequest) {
   // If uid provided → update existing
   if (uid) {
     await adminDb.collection("admin_users").doc(uid).set(
-      { role, ...scopingFields, updatedAt: new Date().toISOString() },
+      { role, ...scopingFields, secondary_roles: validSecondaryRoles, updatedAt: new Date().toISOString() },
       { merge: true }
     );
     logAudit({ actor: "super_admin", action: "user.update", details: `Updated role to ${role}`, targetId: uid, targetType: "user" });
@@ -156,6 +162,7 @@ export async function POST(req: NextRequest) {
         email: userRecord.email,
         role,
         ...scopingFields,
+        secondary_roles: validSecondaryRoles,
         createdAt: new Date().toISOString(),
       });
     logAudit({ actor: "super_admin", action: "user.create", details: `Added ${email} as ${role}${wasCreated ? " (account auto-created)" : ""}`, targetId: userRecord.uid, targetType: "user" });

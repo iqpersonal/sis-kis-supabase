@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
     }
 
     const students: StudentInfo[] = [];
+    const missingProgressIds: string[] = [];
 
     // Batch reads (Firestore getAll max 100)
     const batches = [];
@@ -131,7 +132,10 @@ export async function GET(req: NextRequest) {
       const docs = await adminDb.getAll(...refs);
 
       for (const doc of docs) {
-        if (!doc.exists) continue;
+        if (!doc.exists) {
+          missingProgressIds.push(doc.id);
+          continue;
+        }
         const s = doc.data()!;
         students.push({
           studentNumber: doc.id,
@@ -141,6 +145,81 @@ export async function GET(req: NextRequest) {
           grade: className || classCode || "",
           section: section || sectionCode || "",
         } as StudentInfo);
+      }
+    }
+
+    // Fallback: compose names from family_children + raw_Family for missing student_progress docs
+    if (missingProgressIds.length > 0) {
+      // 1. Query students collection by Student_Number to get Family_Number + Child_Number
+      const studentMeta = new Map<string, { familyNum: string; childNum: number }>();
+      for (let i = 0; i < missingProgressIds.length; i += 30) {
+        const chunk = missingProgressIds.slice(i, i + 30);
+        const snap = await adminDb
+          .collection("students")
+          .where("Student_Number", "in", chunk)
+          .get();
+        for (const d of snap.docs) {
+          const data = d.data();
+          studentMeta.set(
+            String(data.Student_Number),
+            { familyNum: String(data.Family_Number || ""), childNum: Number(data.Child_Number || 0) }
+          );
+        }
+      }
+
+      // 2. Batch-fetch family_children and raw_Family by family numbers
+      const familyNums = [...new Set([...studentMeta.values()].map((m) => m.familyNum).filter(Boolean))];
+      const childMap = new Map<string, { nameEn: string; nameAr: string; gender: string }>();
+      const familyNameMap = new Map<string, { father: string; fatherAr: string; family: string; familyAr: string }>();
+
+      for (let i = 0; i < familyNums.length; i += 30) {
+        const chunk = familyNums.slice(i, i + 30);
+        const [childSnap, famSnap] = await Promise.all([
+          adminDb.collection("family_children").where("Family_Number", "in", chunk).get(),
+          adminDb.collection("raw_Family").where("Family_Number", "in", chunk).get(),
+        ]);
+        for (const d of childSnap.docs) {
+          const data = d.data();
+          const key = `${data.Family_Number}__${data.Child_Number}`;
+          childMap.set(key, {
+            nameEn: data.E_Child_Name || "",
+            nameAr: data.A_Child_Name || "",
+            gender: data.Gender === true ? "M" : data.Gender === false ? "F" : "",
+          });
+        }
+        for (const d of famSnap.docs) {
+          const data = d.data();
+          familyNameMap.set(String(data.Family_Number), {
+            father: data.E_Father_Name || "",
+            fatherAr: data.A_Father_Name || "",
+            family: data.E_Family_Name || "",
+            familyAr: data.A_Family_Name || "",
+          });
+        }
+      }
+
+      // 3. Compose full names for each missing student
+      for (const sn of missingProgressIds) {
+        const meta = studentMeta.get(sn);
+        const childKey = meta ? `${meta.familyNum}__${meta.childNum}` : "";
+        const child = childMap.get(childKey);
+        const fam = meta ? familyNameMap.get(meta.familyNum) : undefined;
+
+        const nameEn = child
+          ? [child.nameEn, fam?.father, fam?.family].filter(Boolean).join(" ")
+          : sn;
+        const nameAr = child
+          ? [child.nameAr, fam?.fatherAr, fam?.familyAr].filter(Boolean).join(" ")
+          : "";
+
+        students.push({
+          studentNumber: sn,
+          nameEn,
+          nameAr,
+          gender: child?.gender || "",
+          grade: className || classCode || "",
+          section: section || sectionCode || "",
+        });
       }
     }
 

@@ -217,7 +217,7 @@ export default function ContactUpdatePage() {
 
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <img src="/kis-logo.png" alt="KIS" style={{ height: 72, margin: "0 auto 8px", display: "block" }} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img src="/kis-logo.png" alt="KIS" style={{ height: 72, width: "auto", margin: "0 auto 8px", display: "block" }} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           <h2 style={{ fontSize: 18, fontWeight: 700, color: "#1a365d", margin: "0 0 4px" }}>{l.schoolName}</h2>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>{l.pageTitle}</h1>
         </div>

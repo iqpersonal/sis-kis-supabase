@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,11 @@ interface AssignedClass {
   subject?: string;
 }
 
+interface SubjectEntry {
+  name: string;
+  periods: number;
+}
+
 interface SubjectInfo {
   code: string;
   nameEn: string;
@@ -90,9 +95,21 @@ export default function ClassAssignmentPage() {
   const [selectedClassIds, setSelectedClassIds] = useState<Set<string>>(new Set());
   const [classesLoading, setClassesLoading] = useState(false);
 
-  // Subject
+  // Subject — per-class map: classId → array of {name, periods}
   const [subjects, setSubjects] = useState<SubjectInfo[]>([]);
-  const [selectedSubject, setSelectedSubject] = useState("");
+  const [classSubjects, setClassSubjects] = useState<Record<string, SubjectEntry[]>>({});
+  const [openSubjectDropdown, setOpenSubjectDropdown] = useState<string | null>(null);
+
+  // Close subject dropdown on outside click
+  useEffect(() => {
+    if (!openSubjectDropdown) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-subject-dropdown]')) setOpenSubjectDropdown(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openSubjectDropdown]);
 
   // Search filters
   const [searchFilter, setSearchFilter] = useState("");
@@ -167,15 +184,23 @@ export default function ClassAssignmentPage() {
     setSuccessMsg(null);
     setErrorMsg(null);
 
-    // Pre-select currently assigned classes & subject
+    // Pre-select currently assigned classes & per-class subjects
     const teacher = teachers.find((t) => t.uid === uid);
     const assigned = teacher?.assigned_classes || [];
     const currentIds = new Set(assigned.map((c) => c.classId));
     setSelectedClassIds(currentIds);
 
-    // Restore subject from existing assignments
-    const existingSubject = assigned.length > 0 ? assigned[0].subject || "" : "";
-    setSelectedSubject(existingSubject);
+    // Restore per-class subjects from existing assignments
+    const subjectMap: Record<string, SubjectEntry[]> = {};
+    assigned.forEach((c) => {
+      if (c.subject) {
+        subjectMap[c.classId] = c.subject.split(", ").filter(Boolean).map((s) => {
+          const [name, p] = s.split(":");
+          return { name: name.trim(), periods: p ? parseInt(p, 10) || 0 : 0 };
+        }).filter((e) => e.name && e.name !== "undefined");
+      }
+    });
+    setClassSubjects(subjectMap);
   }
 
   function toggleClassSelection(classId: string) {
@@ -222,7 +247,7 @@ export default function ClassAssignmentPage() {
           section: c.section,
           year: c.year,
           campus: c.campus,
-          subject: selectedSubject,
+          subject: (classSubjects[c.classId] || []).map((s) => `${s.name}:${s.periods}`).join(", "),
         }));
 
       const res = await fetch("/api/admin/users/assign-classes", {
@@ -318,7 +343,7 @@ export default function ClassAssignmentPage() {
               {t("selectTeacher" as never) || "Select Teacher"}
             </CardTitle>
             <CardDescription className="text-xs">
-              {teachers.length} {t("selectTeacher" as never) ? "" : "teachers"}
+              {teachers.length} {t("teachers" as never) || "teachers"}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -356,6 +381,13 @@ export default function ClassAssignmentPage() {
                   .map((teacher) => {
                   const isSelected = teacher.uid === selectedTeacherUid;
                   const assignedCount = teacher.assigned_classes?.length || 0;
+                  const totalPeriods = (teacher.assigned_classes || []).reduce((sum, c) => {
+                    if (!c.subject) return sum;
+                    return sum + c.subject.split(", ").filter(Boolean).reduce((s2, entry) => {
+                      const [, p] = entry.split(":");
+                      return s2 + (p ? parseInt(p, 10) || 0 : 0);
+                    }, 0);
+                  }, 0);
                   return (
                     <button
                       key={teacher.uid}
@@ -379,7 +411,21 @@ export default function ClassAssignmentPage() {
                             {assignedCount}
                           </span>
                         )}
+                        {totalPeriods > 0 && (
+                          <span className="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 px-1.5 py-0.5 rounded-full">
+                            {totalPeriods} periods
+                          </span>
+                        )}
                       </div>
+                      {assignedCount > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {teacher.assigned_classes!.map((c) => (
+                            <span key={c.classId} className="text-[10px] bg-muted px-1.5 py-0.5 rounded">
+                              {c.className} — {c.section}{c.subject ? ` (${c.subject.split(", ").filter((s) => !s.startsWith("undefined")).map((s) => { const [n, p] = s.split(":"); return p ? `${n} ×${p}` : n; }).join(", ")})` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -449,21 +495,7 @@ export default function ClassAssignmentPage() {
                       className="pl-8 h-9 text-sm"
                     />
                   </div>
-                  <div className="relative">
-                    <select
-                      value={selectedSubject}
-                      onChange={(e) => setSelectedSubject(e.target.value)}
-                      className="h-9 rounded-md border bg-background px-3 pr-8 text-sm appearance-none cursor-pointer"
-                    >
-                      <option value="">{t("subject" as never) || "Select Subject"}</option>
-                      {subjects.map((s) => (
-                        <option key={s.code} value={s.nameEn}>
-                          {s.nameEn}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-2 top-2.5 h-4 w-4 pointer-events-none text-muted-foreground" />
-                  </div>
+
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -530,6 +562,9 @@ export default function ClassAssignmentPage() {
                             <TableHead className="font-semibold">
                               {t("campus" as never) || "Campus"}
                             </TableHead>
+                            <TableHead className="font-semibold">
+                              {t("subject" as never) || "Subject"}
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -575,6 +610,82 @@ export default function ClassAssignmentPage() {
                                   >
                                     {c.campus || "—"}
                                   </span>
+                                </TableCell>
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                    <div className="relative min-w-[160px]" data-subject-dropdown>
+                                      <button
+                                        type="button"
+                                        onClick={() => setOpenSubjectDropdown((prev) => prev === c.classId ? null : c.classId)}
+                                        className="h-7 w-full rounded border bg-background px-2 text-xs text-left flex items-center justify-between gap-1"
+                                      >
+                                        <span className="truncate">
+                                          {(classSubjects[c.classId] || []).length > 0
+                                            ? classSubjects[c.classId].map((s) => `${s.name} (${s.periods})`).join(", ")
+                                            : "— Select —"}
+                                        </span>
+                                        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                      </button>
+                                      {openSubjectDropdown === c.classId && (
+                                        <div className="absolute z-50 mt-1 w-72 rounded-md border bg-popover shadow-lg max-h-56 overflow-y-auto">
+                                          {subjects.map((s) => {
+                                            const entry = (classSubjects[c.classId] || []).find((e) => e.name === s.nameEn);
+                                            const isSelected = !!entry;
+                                            return (
+                                              <div key={s.code} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent">
+                                                <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => {
+                                                      setClassSubjects((prev) => {
+                                                        const current = prev[c.classId] || [];
+                                                        const next = isSelected
+                                                          ? current.filter((x) => x.name !== s.nameEn)
+                                                          : [...current, { name: s.nameEn, periods: 0 }];
+                                                        return { ...prev, [c.classId]: next };
+                                                      });
+                                                      if (!isSelected) {
+                                                        setSelectedClassIds((prev) => {
+                                                          if (prev.has(c.classId)) return prev;
+                                                          const next = new Set(prev);
+                                                          next.add(c.classId);
+                                                          return next;
+                                                        });
+                                                      }
+                                                    }}
+                                                    className="rounded"
+                                                  />
+                                                  <span className="truncate">{s.nameEn}</span>
+                                                </label>
+                                                {isSelected && (
+                                                  <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={50}
+                                                    value={entry!.periods || ""}
+                                                    placeholder="0"
+                                                    onChange={(e) => {
+                                                      const val = parseInt(e.target.value, 10) || 0;
+                                                      setClassSubjects((prev) => {
+                                                        const current = prev[c.classId] || [];
+                                                        return {
+                                                          ...prev,
+                                                          [c.classId]: current.map((x) =>
+                                                            x.name === s.nameEn ? { ...x, periods: val } : x
+                                                          ),
+                                                        };
+                                                      });
+                                                    }}
+                                                    className="w-12 h-6 rounded border bg-background px-1 text-xs text-center"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                  />
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
                                 </TableCell>
                               </TableRow>
                             );
