@@ -4,8 +4,11 @@ import { StyleSheet, BackHandler, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { colors, fontSize } from "@/lib/theme";
+import { useAuth, hasLibraryAccess } from "@/context/auth-context";
 
 export default function StaffTabLayout() {
+  const { roles } = useAuth();
+  const libraryAccess = hasLibraryAccess(roles);
   // Prevent Android back button from navigating to login screen
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -70,6 +73,16 @@ export default function StaffTabLayout() {
           title: "Store",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="library"
+        options={{
+          title: "Library",
+          href: libraryAccess ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="book-outline" size={size} color={color} />
           ),
         }}
       />

@@ -53,9 +53,10 @@ export default function TeacherClassesPage() {
 
     const fetchClasses = async () => {
       try {
-        const res = await fetch(
-          `/api/teacher/classes?username=${encodeURIComponent(teacher.username)}`
-        );
+        const param = teacher.username
+          ? `username=${encodeURIComponent(teacher.username)}`
+          : `uid=${encodeURIComponent(teacher.uid)}`;
+        const res = await fetch(`/api/teacher/classes?${param}`);
         const data = await res.json();
         setClasses(data.classes || []);
       } catch {

@@ -17,8 +17,8 @@ const GRID_PADDING = spacing.lg * 2;
 const ACTION_CARD_WIDTH = (SCREEN_WIDTH - GRID_PADDING - CARD_GAP * 2) / 3;
 
 export default function StoreHome() {
-  const { role, user } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles, user } = useAuth();
+  const access = getStoreAccess(roles);
 
   // Default to whichever store the user has access to
   const [activeStore, setActiveStore] = useState<StoreConfig>(

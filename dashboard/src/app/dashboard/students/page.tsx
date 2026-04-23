@@ -4,12 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import {
-  usePaginatedCollection,
-  useCollection,
-} from "@/hooks/use-sis-data";
+import { useCollection } from "@/hooks/use-sis-data";
 import { useClassNames } from "@/hooks/use-classes";
-import { PaginationControls } from "@/components/ui/pagination-controls";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,12 +23,23 @@ import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
 import { useAuth } from "@/context/auth-context";
 import { getDb } from "@/lib/firebase";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
+import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { exportToCSV } from "@/lib/export-csv";
 
 type DocRecord = Record<string, unknown> & { id: string };
 type StatusFilter = "all" | "active" | "withdrawn";
 
 const EXCLUDED_CLASS_CODES = new Set(["34", "51"]);
+
+function formatGender(value: unknown, maleLabel: string, femaleLabel: string) {
+  if (value === true) return maleLabel;
+  if (value === false) return femaleLabel;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["male", "m", "true", "boy"].includes(normalized)) return maleLabel;
+  if (["female", "f", "false", "girl"].includes(normalized)) return femaleLabel;
+  return "-";
+}
 
 export default function StudentsPage() {
   const router = useRouter();
@@ -54,23 +61,26 @@ export default function StudentsPage() {
     { classCode: string; sectionCode: string; sectionName: string }[]
   >([]);
 
-  // Load sections when school changes
+  // Load sections when school/year changes
   useEffect(() => {
     const school = schoolFilter === "all" ? "" : schoolFilter;
-    if (!school) {
-      setClassSections([]);
-      setClassFilter("all");
-      setSectionFilter("all");
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", selectedYear || "25-26"),
-          where("Major_Code", "==", school)
-        );
+        let q;
+        if (school) {
+          q = query(
+            collection(getDb(), "sections"),
+            where("Academic_Year", "==", selectedYear || "25-26"),
+            where("Major_Code", "==", school)
+          );
+        } else {
+          q = query(
+            collection(getDb(), "sections"),
+            where("Academic_Year", "==", selectedYear || "25-26"),
+            limit(2000)
+          );
+        }
         const snap = await getDocs(q);
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
@@ -147,36 +157,18 @@ export default function StudentsPage() {
     [classSections]
   );
 
-  /* ─── Data hooks ─── */
-  const {
-    data: pagedRegs,
-    loading: pagedLoading,
-    error: pagedError,
-    pagination,
-    goNext,
-    goPrev,
-    goFirst,
-    setPageSize,
-  } = usePaginatedCollection<DocRecord>("registrations", "Student_Number", 50, selectedYear);
-
-  const needServerSearch =
-    searchMode ||
-    statusFilter !== "all" ||
-    schoolFilter !== "all" ||
-    classFilter !== "all" ||
-    sectionFilter !== "all";
-
-  const isFiltering = needServerSearch;
-
-  // Server-side search state
+  /* ─── Server-side listing state ─── */
   const [serverResults, setServerResults] = useState<DocRecord[]>([]);
   const [serverLoading, setServerLoading] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [serverTotal, setServerTotal] = useState(0);
+  const [serverOffset, setServerOffset] = useState(0);
+  const SERVER_PAGE_SIZE = 50;
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const fetchServerSearch = useCallback(async () => {
-    if (!needServerSearch) return;
+  const fetchServerSearch = useCallback(async (offset = 0) => {
     setServerLoading(true);
+    setServerError(null);
     try {
       const params = new URLSearchParams();
       params.set("year", selectedYear || "25-26");
@@ -185,7 +177,8 @@ export default function StudentsPage() {
       if (classFilter !== "all") params.set("class", classFilter);
       if (sectionFilter !== "all") params.set("section", sectionFilter);
       if (statusFilter !== "all") params.set("status", statusFilter);
-      params.set("limit", "500");
+      params.set("limit", String(SERVER_PAGE_SIZE));
+      params.set("offset", String(offset));
 
       const res = await fetch(`/api/students/search?${params}`);
       if (!res.ok) throw new Error("Search failed");
@@ -195,28 +188,41 @@ export default function StudentsPage() {
           ...s,
           id: s.id || String(i),
           _student: {
-            E_Full_Name: s.E_Full_Name,
+            E_Student_Name: s.E_Student_Name,
+            A_Student_Name: s.A_Student_Name,
             Gender: s.Gender,
-            Child_Birth_Date: s.Child_Birth_Date,
-            Nationality_Code_Primary: s.Nationality_Code_Primary,
+            Birth_Date: s.Birth_Date,
+            Nationality_Name: s.Nationality_Name,
+            Nationality_Code: s.Nationality_Code,
           },
-        }))
+        })).sort((a: DocRecord, b: DocRecord) => compareAlphabeticalNames(
+          (a._student as DocRecord | null)?.E_Student_Name,
+          (b._student as DocRecord | null)?.E_Student_Name
+        ))
       );
+      setServerOffset(offset);
       setServerTotal(data.total || 0);
     } catch (err) {
       console.error("Server search failed:", err);
+      setServerError(err instanceof Error ? err.message : "Search failed");
+      setServerResults([]);
+      setServerTotal(0);
     } finally {
       setServerLoading(false);
     }
-  }, [needServerSearch, selectedYear, search, schoolFilter, classFilter, sectionFilter, statusFilter]);
+  }, [selectedYear, search, schoolFilter, classFilter, sectionFilter, statusFilter]);
 
-  // Debounce server search for text input, immediate for dropdown changes
+  // Reset to page 1 when filters change
   useEffect(() => {
-    if (!needServerSearch) return;
+    setServerOffset(0);
+  }, [search, selectedYear, schoolFilter, classFilter, sectionFilter, statusFilter]);
+
+  // Debounce list/search requests for the shared server-backed grid.
+  useEffect(() => {
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(fetchServerSearch, search.trim() ? 400 : 50);
+    debounceRef.current = setTimeout(() => fetchServerSearch(0), search.trim() ? 400 : 50);
     return () => clearTimeout(debounceRef.current);
-  }, [needServerSearch, fetchServerSearch, search]);
+  }, [fetchServerSearch, search]);
 
   const { data: nationalities } = useCollection<DocRecord>("nationalities", 500);
 
@@ -230,61 +236,12 @@ export default function StudentsPage() {
     return map;
   }, [nationalities]);
 
-  const enrich = (reg: DocRecord): DocRecord => {
-    // For paginated (non-search) mode, _student isn't set — return as-is
-    return reg;
-  };
-
-  // Enrich paginated results with student details (small batch per page)
-  const [enrichedPagedRegs, setEnrichedPagedRegs] = useState<DocRecord[]>([]);
-  useEffect(() => {
-    if (isFiltering || pagedRegs.length === 0) {
-      setEnrichedPagedRegs([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const db = getDb();
-        const sns = [...new Set(pagedRegs.map((r) => String(r.Student_Number || "")))].filter(Boolean);
-        const studentMap = new Map<string, Record<string, unknown>>();
-        // Fetch in batches of 30 (Firestore 'in' limit)
-        for (let i = 0; i < sns.length; i += 30) {
-          const batch = sns.slice(i, i + 30);
-          const q = query(
-            collection(getDb(), "students"),
-            where("Student_Number", "in", batch.map((sn) => {
-              const num = Number(sn);
-              return isNaN(num) ? sn : num;
-            }))
-          );
-          const snap = await getDocs(q);
-          snap.docs.forEach((d) => {
-            const data = d.data();
-            studentMap.set(String(data.Student_Number), data);
-          });
-        }
-        if (cancelled) return;
-        setEnrichedPagedRegs(
-          pagedRegs.map((reg) => {
-            const stu = studentMap.get(String(reg.Student_Number)) || null;
-            return { ...reg, _student: stu } as DocRecord;
-          })
-        );
-      } catch (err) {
-        console.error("Failed to enrich students:", err);
-        setEnrichedPagedRegs(pagedRegs);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [pagedRegs, isFiltering]);
-
   /* ─── Display logic ─── */
-  const displayData = isFiltering ? serverResults : (enrichedPagedRegs.length > 0 ? enrichedPagedRegs : pagedRegs);
-  const loading = isFiltering ? serverLoading : pagedLoading;
-  const displayCount = isFiltering ? serverTotal : pagination.totalCount;
+  const displayData = serverResults;
+  const loading = serverLoading;
+  const displayCount = serverTotal;
 
-  if (!isFiltering && loading && pagedRegs.length === 0) {
+  if (loading && displayData.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center text-muted-foreground">
         {t("loadingStudents")}
@@ -292,10 +249,10 @@ export default function StudentsPage() {
     );
   }
 
-  if (pagedError) {
+  if (serverError) {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-        {pagedError}
+        {serverError}
       </div>
     );
   }
@@ -317,7 +274,6 @@ export default function StudentsPage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              const { exportToCSV } = require("@/lib/export-csv");
               exportToCSV(
                 `students-${selectedYear}`,
                 [t("studentNumber"), t("name"), t("gender"), t("birthDate"), t("profileNationality"), t("status")],
@@ -325,11 +281,13 @@ export default function StudentsPage() {
                   const stu = s._student as DocRecord | null;
                   return [
                     String(s.Student_Number || ""),
-                    String(stu?.E_Full_Name || stu?.E_Child_Name || "-"),
-                    stu?.Gender === true ? t("male") : stu?.Gender === false ? t("female") : "-",
-                    stu?.Child_Birth_Date ? String(stu.Child_Birth_Date).split("T")[0] : "-",
-                    stu?.Nationality_Code_Primary
-                      ? nationalityMap.get(String(stu.Nationality_Code_Primary)) || String(stu.Nationality_Code_Primary)
+                    String(stu?.E_Student_Name || stu?.E_Full_Name || stu?.E_Child_Name || "-"),
+                    formatGender(stu?.Gender, t("male"), t("female")),
+                    (stu?.Birth_Date || stu?.Child_Birth_Date) ? String(stu?.Birth_Date || stu?.Child_Birth_Date).split("T")[0] : "-",
+                    (stu?.Nationality_Name || stu?.Nationality_Code || stu?.Nationality_Code_Primary)
+                      ? String(stu?.Nationality_Name || "") ||
+                        nationalityMap.get(String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)) ||
+                        String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)
                       : "-",
                     s.Termination_Date ? t("withdrawn") : t("active"),
                   ];
@@ -356,7 +314,7 @@ export default function StudentsPage() {
             }}
             className="pl-9"
           />
-          {isFiltering && serverLoading && (
+          {serverLoading && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
               {t("searching")}
             </span>
@@ -377,8 +335,8 @@ export default function StudentsPage() {
             <option value="withdrawn">{t("withdrawnOnly")}</option>
           </select>
 
-          {/* Class filter (only when a school is selected) */}
-          {schoolFilter !== "all" && (
+          {/* Class filter */}
+          {uniqueClasses.length > 0 && (
             <select
               value={classFilter}
               onChange={(e) => setClassFilter(e.target.value)}
@@ -452,16 +410,18 @@ export default function StudentsPage() {
                   <TableCell className="font-medium font-mono">
                     {String(s.Student_Number || "")}
                   </TableCell>
-                  <TableCell>{String(stu?.E_Full_Name || stu?.E_Child_Name || "-")}</TableCell>
+                  <TableCell>{String(stu?.E_Student_Name || stu?.E_Full_Name || stu?.E_Child_Name || "-")}</TableCell>
                   <TableCell>
-                    {stu?.Gender === true ? t("male") : stu?.Gender === false ? t("female") : "-"}
+                    {formatGender(stu?.Gender, t("male"), t("female"))}
                   </TableCell>
                   <TableCell>
-                    {stu?.Child_Birth_Date ? String(stu.Child_Birth_Date).split("T")[0] : "-"}
+                    {(stu?.Birth_Date || stu?.Child_Birth_Date) ? String(stu?.Birth_Date || stu?.Child_Birth_Date).split("T")[0] : "-"}
                   </TableCell>
                   <TableCell>
-                    {stu?.Nationality_Code_Primary
-                      ? nationalityMap.get(String(stu.Nationality_Code_Primary)) || String(stu.Nationality_Code_Primary)
+                    {(stu?.Nationality_Name || stu?.Nationality_Code || stu?.Nationality_Code_Primary)
+                      ? String(stu?.Nationality_Name || "") ||
+                        nationalityMap.get(String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)) ||
+                        String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)
                       : "-"}
                   </TableCell>
                   <TableCell>
@@ -481,23 +441,47 @@ export default function StudentsPage() {
           </TableBody>
         </Table>
 
-        {/* Pagination (only when not filtering) */}
-        {!isFiltering && (
-          <PaginationControls
-            pagination={pagination}
-            onNext={goNext}
-            onPrev={goPrev}
-            onFirst={goFirst}
-            onPageSizeChange={setPageSize}
-            loading={loading}
-          />
-        )}
-
-        {/* Filtered result count */}
-        {isFiltering && !serverLoading && (
-          <div className="border-t p-3 text-center text-sm text-muted-foreground">
-            {serverTotal.toLocaleString()} {serverTotal !== 1 ? t("navStudents") : t("navStudentProfile")}
-            {search.trim() ? ` — ${t("noStudentsMatch").replace(".", "")}` : ""}
+        {/* Server pagination */}
+        {serverTotal > 0 && (
+          <div className="flex items-center justify-between border-t px-4 py-3">
+            <span className="text-sm text-muted-foreground">
+              {serverLoading ? t("searching") : (
+                <>
+                  {serverTotal.toLocaleString()} {serverTotal !== 1 ? t("navStudents") : t("navStudentProfile")}
+                  {serverTotal > SERVER_PAGE_SIZE && (
+                    <> &middot; Page {Math.floor(serverOffset / SERVER_PAGE_SIZE) + 1} of {Math.ceil(serverTotal / SERVER_PAGE_SIZE)}</>
+                  )}
+                </>
+              )}
+            </span>
+            {serverTotal > SERVER_PAGE_SIZE && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={serverOffset === 0 || serverLoading}
+                  onClick={() => fetchServerSearch(0)}
+                >
+                  First
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={serverOffset === 0 || serverLoading}
+                  onClick={() => fetchServerSearch(serverOffset - SERVER_PAGE_SIZE)}
+                >
+                  Prev
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={serverOffset + SERVER_PAGE_SIZE >= serverTotal || serverLoading}
+                  onClick={() => fetchServerSearch(serverOffset + SERVER_PAGE_SIZE)}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

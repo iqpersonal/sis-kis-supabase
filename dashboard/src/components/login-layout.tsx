@@ -43,6 +43,7 @@ export function LoginLayout({
               alt="KiS"
               width={44}
               height={44}
+              style={{ height: "auto" }}
               className="rounded-full"
               unoptimized
             />

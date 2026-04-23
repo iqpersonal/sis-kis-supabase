@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/context/auth-context";
 import { useLanguage } from "@/context/language-context";
+import { useAcademicYear } from "@/context/academic-year-context";
+import { useSchoolFilter } from "@/context/school-filter-context";
 import { PageTransition } from "@/components/motion";
 import {
   Card,
@@ -69,18 +71,29 @@ function emptyCategory(order: number): AssessmentCategory {
   };
 }
 
+function dedupeOptions<T extends { value: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (!item.value || seen.has(item.value)) return false;
+    seen.add(item.value);
+    return true;
+  });
+}
+
 /* ── Main Page ────────────────────────────────────────────── */
 
 export default function AssessmentSetupPage() {
   const { user, can } = useAuth();
   const { t, locale } = useLanguage();
+  const { selectedYear, setSelectedYear, locked: yearLocked } = useAcademicYear();
+  const { schoolFilter } = useSchoolFilter();
   const isRtl = locale === "ar";
 
   // Selection state
-  const [year, setYear] = useState("");
   const [classCode, setClassCode] = useState("");
   const [subjectCode, setSubjectCode] = useState("");
   const [semester, setSemester] = useState<"S1" | "S2">("S1");
+  const year = selectedYear || "";
 
   // Reference data
   const [years, setYears] = useState<{ value: string; label: string }[]>([]);
@@ -112,9 +125,13 @@ export default function AssessmentSetupPage() {
           ? { Authorization: `Bearer ${token}` }
           : {};
 
+        const classParams = new URLSearchParams();
+        if (selectedYear) classParams.set("year", selectedYear);
+        if (schoolFilter !== "all") classParams.set("school", schoolFilter);
+
         const [yearRes, classRes, subjectRes] = await Promise.all([
           fetch("/api/academic-year", { headers }),
-          fetch("/api/classes", { headers }),
+          fetch(`/api/classes?${classParams.toString()}`, { headers }),
           fetch("/api/subjects", { headers }),
         ]);
 
@@ -122,28 +139,42 @@ export default function AssessmentSetupPage() {
         const classData = await classRes.json();
         const subjectData = await subjectRes.json();
 
-        const yrs = (yearData.years || yearData || []).map(
-          (y: { Academic_Year: string; Current_Year?: boolean }) => ({
-            value: y.Academic_Year,
-            label: y.Academic_Year,
-            current: y.Current_Year,
-          })
+        const yrsRaw = (yearData.years || yearData || []).map(
+          (y: {
+            Academic_Year?: string;
+            year?: string;
+            Current_Year?: boolean;
+            current_year?: boolean;
+          }) => {
+            const yearValue = y.Academic_Year || y.year || "";
+            return {
+              value: yearValue,
+              label: yearValue,
+              current: y.Current_Year ?? y.current_year ?? false,
+            };
+          }
         );
+        const yrs = dedupeOptions<{ value: string; label: string }>(yrsRaw);
         setYears(yrs);
-        const currentYear = yrs.find((y: { current?: boolean }) => y.current);
-        if (currentYear) setYear(currentYear.value);
 
-        const cls = (classData.classes || classData || []).map(
-          (c: { Class_Code: string; E_Class_Name?: string; A_Class_Name?: string }) => ({
+        const clsRaw = (classData.classes || classData || []).map(
+          (c: {
+            Class_Code: string;
+            E_Class_Name?: string;
+            A_Class_Name?: string;
+            E_Class_Desc?: string;
+            A_Class_Desc?: string;
+          }) => ({
             value: String(c.Class_Code),
             label: isRtl
-              ? c.A_Class_Name || c.E_Class_Name || c.Class_Code
-              : c.E_Class_Name || c.A_Class_Name || c.Class_Code,
+              ? c.A_Class_Name || c.A_Class_Desc || c.E_Class_Name || c.E_Class_Desc || c.Class_Code
+              : c.E_Class_Name || c.E_Class_Desc || c.A_Class_Name || c.A_Class_Desc || c.Class_Code,
           })
         );
+        const cls = dedupeOptions<{ value: string; label: string }>(clsRaw as { value: string; label: string }[]);
         setClasses(cls);
 
-        const subs = (subjectData.subjects || subjectData || []).map(
+        const subsRaw = (subjectData.subjects || subjectData || []).map(
           (s: { Subject_Code: string; E_Subject_Name?: string; A_Subject_Name?: string }) => ({
             value: String(s.Subject_Code),
             label: isRtl
@@ -151,13 +182,14 @@ export default function AssessmentSetupPage() {
               : s.E_Subject_Name || s.A_Subject_Name || s.Subject_Code,
           })
         );
+        const subs = dedupeOptions<{ value: string; label: string }>(subsRaw as { value: string; label: string }[]);
         setSubjects(subs);
       } catch {
         /* ignore load errors */
       }
     }
     if (user) load();
-  }, [user, isRtl]);
+  }, [user, isRtl, selectedYear, schoolFilter]);
 
   // ── Fetch template when selection changes ────────────────
   const fetchTemplate = useCallback(async () => {
@@ -440,7 +472,7 @@ export default function AssessmentSetupPage() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div>
               <Label>Academic Year</Label>
-              <Select value={year} onValueChange={setYear}>
+              <Select value={year} onValueChange={setSelectedYear} disabled={yearLocked}>
                 <SelectTrigger><SelectValue placeholder="Select Year" /></SelectTrigger>
                 <SelectContent>
                   {years.map((y) => (

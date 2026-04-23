@@ -37,8 +37,8 @@ function StatusBadge({ status }: { status: RequestStatus }) {
 }
 
 export default function RequestsScreen() {
-  const { role, user } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles, user } = useAuth();
+  const access = getStoreAccess(roles);
   const router = useRouter();
 
   const [activeStore, setActiveStore] = useState<StoreConfig>(

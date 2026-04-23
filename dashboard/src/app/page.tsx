@@ -121,7 +121,7 @@ export default function LandingPage() {
       <nav className="fixed top-0 inset-x-0 z-50 border-b border-white/10 bg-[#0a0a1a]/70 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-3">
-            <Image src="/kis-logo.png" alt="KiS" width={44} height={44} className="rounded-full" unoptimized />
+            <Image src="/kis-logo.png" alt="KiS" width={44} height={44} style={{ height: "auto" }} className="rounded-full" unoptimized />
             <div className="hidden sm:block">
               <span className="text-sm font-bold tracking-tight leading-none">
                 Khaled International Schools
@@ -595,7 +595,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <Image src="/kis-logo.png" alt="KiS" width={36} height={36} className="rounded-full" unoptimized />
+              <Image src="/kis-logo.png" alt="KiS" width={36} height={36} style={{ height: "auto" }} className="rounded-full" unoptimized />
               <div>
                 <span className="text-sm font-bold leading-none">Khaled International Schools</span>
                 <span className="block text-[10px] text-[#d4af37]">مدارس خالد العالمية</span>

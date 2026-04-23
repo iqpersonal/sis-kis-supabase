@@ -31,8 +31,12 @@ const LABELS: Record<SchoolFilter, string> = {
 
 export function SchoolFilterProvider({ children }: { children: ReactNode }) {
   const { role, assignedMajor } = useAuth();
-  const locked = !!role && MAJOR_SCOPED_ROLES.includes(role as Role) && !!assignedMajor;
-  const forcedValue = (locked ? assignedMajor : null) as SchoolFilter | null;
+  const canSelectSchool = role === "super_admin" || role === "school_admin";
+  const roleIsMajorScoped = !!role && MAJOR_SCOPED_ROLES.includes(role as Role);
+  const locked = !canSelectSchool;
+  const forcedValue = (locked
+    ? ((roleIsMajorScoped && assignedMajor ? assignedMajor : "all") as SchoolFilter)
+    : null);
 
   const [schoolFilter, setSchoolFilterInternal] = useState<SchoolFilter>(
     forcedValue ?? "all"

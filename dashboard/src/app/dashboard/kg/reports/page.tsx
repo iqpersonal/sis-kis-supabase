@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useLanguage } from "@/context/language-context";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 import { PageTransition } from "@/components/motion";
 import {
   DEFAULT_KG_DOMAINS, KG_LEVELS, KG_TERMS, KG_LEVEL_MAP,
@@ -627,7 +628,7 @@ export default function KgReportPage() {
         ) : (
           <div className="space-y-2">
             {assessments
-              .sort((a, b) => a.student_name.localeCompare(b.student_name))
+              .sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name))
               .map((assessment) => {
                 const allSkills = domains.flatMap((d) => d.skills);
                 const ratedCount = allSkills.filter((s) => assessment.ratings?.[s.id]).length;

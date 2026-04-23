@@ -49,8 +49,8 @@ interface PurchaseOrder {
 }
 
 export default function StaffStore() {
-  const { user, role } = useAuth();
-  const storeAccess = getStoreAccess(role);
+  const { user, roles } = useAuth();
+  const storeAccess = getStoreAccess(roles);
   const [items, setItems] = useState<StoreItem[]>([]);
   const [requests, setRequests] = useState<StoreRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -565,7 +565,8 @@ export default function StaffStore() {
                 </View>
               ))
             )}
-          </>        ) : (
+          </>
+        ) : tab === "issue" ? (
           /* ── Issue Items Tab ── */
           <>
             {/* Scan button for issue */}
@@ -671,7 +672,8 @@ export default function StaffStore() {
                 )}
               </TouchableOpacity>
             )}
-          </>        ) : tab === "receive" ? (
+          </>
+        ) : tab === "receive" ? (
           /* ── Receive Stock Tab ── */
           <>
             {/* Mode toggle */}
@@ -850,7 +852,9 @@ export default function StaffStore() {
                 )}
               </>
             )}
-          </>        )      </ScrollView>
+          </>
+        ) : null}
+      </ScrollView>
 
       {/* Barcode Scanner Modal */}
       <BarcodeScanner

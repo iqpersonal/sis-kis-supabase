@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/context/auth-context";
 import { useAcademicYear } from "@/context/academic-year-context";
+import { useSchoolFilter } from "@/context/school-filter-context";
 import {
   collection,
   query,
@@ -60,6 +61,7 @@ const EXCLUDED_CLASS_CODES = new Set(["34", "51"]); // 34=Terminated, 51=OtherC
 export default function MessagesPage() {
   const { user } = useAuth();
   const { selectedYear } = useAcademicYear();
+  const { schoolFilter, locked: schoolLocked } = useSchoolFilter();
 
   // Compose state
   const [title, setTitle] = useState("");
@@ -85,6 +87,11 @@ export default function MessagesPage() {
   // History state
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    if (schoolFilter !== "all") setSchool(schoolFilter);
+    else if (schoolLocked) setSchool("");
+  }, [schoolFilter, schoolLocked]);
 
   /* ─── Load sections when school changes ─── */
   useEffect(() => {
@@ -283,7 +290,7 @@ export default function MessagesPage() {
         setTitle("");
         setBody("");
         setAudience("all");
-        setSchool("");
+        setSchool(schoolFilter !== "all" ? schoolFilter : "");
         setSelectedTargets([]);
         setFamilyNumber("");
         loadHistory();
@@ -400,6 +407,7 @@ export default function MessagesPage() {
                   <select
                     value={school}
                     onChange={(e) => setSchool(e.target.value)}
+                    disabled={schoolLocked && schoolFilter !== "all"}
                     className="h-9 rounded-md border bg-background px-2 text-sm"
                   >
                     <option value="">Select school</option>

@@ -27,7 +27,9 @@ import {
   Search,
   Users,
   GraduationCap,
+  FileDown,
   ChevronDown,
+  X,
 } from "lucide-react";
 import { getFirebaseAuth } from "@/lib/firebase";
 import type { Role } from "@/lib/rbac";
@@ -73,6 +75,15 @@ interface AvailableClass {
   campus: string;
 }
 
+function formatSubjectLabel(subject: SubjectInfo, isRTL: boolean) {
+  return isRTL ? (subject.nameAr || subject.nameEn) : subject.nameEn;
+}
+
+function formatAssignedSubjects(entries: SubjectEntry[]) {
+  if (entries.length === 0) return "— Select —";
+  return entries.map((s) => `${s.name} (${s.periods})`).join(", ");
+}
+
 /* ── Page ───────────────────────────────────────────────────────── */
 
 export default function ClassAssignmentPage() {
@@ -99,6 +110,11 @@ export default function ClassAssignmentPage() {
   const [subjects, setSubjects] = useState<SubjectInfo[]>([]);
   const [classSubjects, setClassSubjects] = useState<Record<string, SubjectEntry[]>>({});
   const [openSubjectDropdown, setOpenSubjectDropdown] = useState<string | null>(null);
+  const [subjectSearchByClass, setSubjectSearchByClass] = useState<Record<string, string>>({});
+  const [commonSubjectCode, setCommonSubjectCode] = useState("");
+  const [commonSubjectSearch, setCommonSubjectSearch] = useState("");
+  const [commonPeriods, setCommonPeriods] = useState(0);
+  const [commonApplyMode, setCommonApplyMode] = useState<"selected" | "filtered">("selected");
 
   // Close subject dropdown on outside click
   useEffect(() => {
@@ -117,6 +133,7 @@ export default function ClassAssignmentPage() {
 
   // Save state
   const [saving, setSaving] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -213,6 +230,75 @@ export default function ClassAssignmentPage() {
     setSuccessMsg(null);
   }
 
+  function addOrUpdateSubjectForClass(classId: string, subjectName: string, periods: number) {
+    setClassSubjects((prev) => {
+      const current = prev[classId] || [];
+      const existing = current.find((entry) => entry.name === subjectName);
+      const next = existing
+        ? current.map((entry) =>
+            entry.name === subjectName ? { ...entry, periods } : entry
+          )
+        : [...current, { name: subjectName, periods }];
+      return { ...prev, [classId]: next };
+    });
+  }
+
+  function removeSubjectForClass(classId: string, subjectName: string) {
+    setClassSubjects((prev) => {
+      const current = prev[classId] || [];
+      return {
+        ...prev,
+        [classId]: current.filter((entry) => entry.name !== subjectName),
+      };
+    });
+  }
+
+  function getCommonTargetClassIds() {
+    if (commonApplyMode === "filtered") {
+      return filteredClasses.map((entry) => entry.classId);
+    }
+
+    return filteredClasses
+      .filter((entry) => selectedClassIds.has(entry.classId))
+      .map((entry) => entry.classId);
+  }
+
+  function applyCommonSubject() {
+    if (!commonSubjectCode) return;
+    const subject = subjects.find((entry) => entry.code === commonSubjectCode);
+    if (!subject) return;
+
+    const targetClassIds = getCommonTargetClassIds();
+
+    if (targetClassIds.length === 0) return;
+
+    targetClassIds.forEach((classId) => {
+      addOrUpdateSubjectForClass(classId, subject.nameEn, commonPeriods);
+    });
+
+    setSuccessMsg(
+      `Applied ${subject.nameEn} (${commonPeriods}) to ${targetClassIds.length} ${commonApplyMode === "filtered" ? "filtered" : "selected"} classes`
+    );
+  }
+
+  function clearCommonSubject() {
+    if (!commonSubjectCode) return;
+    const subject = subjects.find((entry) => entry.code === commonSubjectCode);
+    if (!subject) return;
+
+    const targetClassIds = getCommonTargetClassIds();
+
+    if (targetClassIds.length === 0) return;
+
+    targetClassIds.forEach((classId) => {
+      removeSubjectForClass(classId, subject.nameEn);
+    });
+
+    setSuccessMsg(
+      `Removed ${subject.nameEn} from ${targetClassIds.length} ${commonApplyMode === "filtered" ? "filtered" : "selected"} classes`
+    );
+  }
+
   function selectAll(filtered: AvailableClass[]) {
     setSelectedClassIds((prev) => {
       const next = new Set(prev);
@@ -276,6 +362,52 @@ export default function ClassAssignmentPage() {
     }
   }
 
+  async function handleDownloadTeacherAssignmentReport() {
+    if (!selectedYear) {
+      setErrorMsg("Select an academic year first");
+      return;
+    }
+
+    setGeneratingReport(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch("/api/pdf-reports", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          type: "teacher_assignment",
+          year: selectedYear,
+          school: schoolFilter,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to generate teacher assignment report");
+      }
+
+      const blob = await res.blob();
+      const fileName = `teacher_assignment_${selectedYear}${schoolFilter !== "all" ? `_${schoolFilter}` : ""}.pdf`;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setSuccessMsg("Teacher assignment report generated");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to generate report");
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   // Load/reload sections when teacher, year, or campus changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -310,8 +442,21 @@ export default function ClassAssignmentPage() {
       return a.section.localeCompare(b.section, undefined, { numeric: true });
     });
 
+  const filteredCommonSubjects = subjects.filter((subject) => {
+    if (!commonSubjectSearch) return true;
+    const query = commonSubjectSearch.toLowerCase();
+    return (
+      subject.nameEn.toLowerCase().includes(query) ||
+      subject.nameAr.toLowerCase().includes(query) ||
+      subject.code.toLowerCase().includes(query)
+    );
+  });
+
   const selectedTeacher = teachers.find((t) => t.uid === selectedTeacherUid);
   const allFilteredSelected = filteredClasses.length > 0 && filteredClasses.every((c) => selectedClassIds.has(c.classId));
+  const commonTargetCount = commonApplyMode === "filtered"
+    ? filteredClasses.length
+    : filteredClasses.filter((entry) => selectedClassIds.has(entry.classId)).length;
 
   if (!isSuperAdmin) {
     return (
@@ -452,21 +597,38 @@ export default function ClassAssignmentPage() {
                 )}
               </div>
 
-              {selectedTeacherUid && (
+              <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  onClick={handleSave}
-                  disabled={saving}
+                  variant="outline"
+                  onClick={handleDownloadTeacherAssignmentReport}
+                  disabled={generatingReport}
                   className="w-fit"
                 >
-                  {saving ? (
+                  {generatingReport ? (
                     <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
                   ) : (
-                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                    <FileDown className="h-4 w-4 mr-1" />
                   )}
-                  {t("save" as never) || "Save Assignments"}
+                  A3 Assignment Report
                 </Button>
-              )}
+
+                {selectedTeacherUid && (
+                  <Button
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="w-fit"
+                  >
+                    {saving ? (
+                      <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4 mr-1" />
+                    )}
+                    {t("save" as never) || "Save Assignments"}
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
 
@@ -513,6 +675,116 @@ export default function ClassAssignmentPage() {
                     </Button>
                   </div>
                 </div>
+
+                {subjects.length > 0 && (
+                  <div className="rounded-md border bg-muted/20 p-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                      <div className="min-w-[280px] flex-1">
+                        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                          Common Subject
+                        </label>
+                        <div className="rounded-md border bg-background">
+                          <div className="border-b p-2">
+                            <Input
+                              value={commonSubjectSearch}
+                              onChange={(e) => setCommonSubjectSearch(e.target.value)}
+                              placeholder="Search subject..."
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                          <div className="max-h-40 overflow-y-auto p-1">
+                            {filteredCommonSubjects.map((subject) => {
+                              const active = commonSubjectCode === subject.code;
+                              return (
+                                <button
+                                  key={subject.code}
+                                  type="button"
+                                  onClick={() => setCommonSubjectCode(subject.code)}
+                                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors ${
+                                    active ? "bg-primary/10 text-primary" : "hover:bg-accent"
+                                  }`}
+                                >
+                                  <span className="truncate">{formatSubjectLabel(subject, isRTL)}</span>
+                                  <span className="ml-2 shrink-0 text-xs text-muted-foreground">{subject.code}</span>
+                                </button>
+                              );
+                            })}
+                            {filteredCommonSubjects.length === 0 && (
+                              <div className="px-2 py-3 text-sm text-muted-foreground">No subjects found</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="w-full lg:w-28">
+                        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                          Periods
+                        </label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={commonPeriods}
+                          onChange={(e) => setCommonPeriods(parseInt(e.target.value, 10) || 0)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="w-full lg:w-44">
+                        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                          Apply To
+                        </label>
+                        <div className="grid grid-cols-2 rounded-md border bg-background p-1">
+                          <button
+                            type="button"
+                            onClick={() => setCommonApplyMode("selected")}
+                            className={`rounded px-2 py-1.5 text-xs transition-colors ${
+                              commonApplyMode === "selected"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-accent"
+                            }`}
+                          >
+                            Selected
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCommonApplyMode("filtered")}
+                            className={`rounded px-2 py-1.5 text-xs transition-colors ${
+                              commonApplyMode === "filtered"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-accent"
+                            }`}
+                          >
+                            Filtered
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={applyCommonSubject}
+                          disabled={!commonSubjectCode || commonTargetCount === 0}
+                        >
+                          Apply to {commonApplyMode === "filtered" ? "Filtered" : "Selected"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={clearCommonSubject}
+                          disabled={!commonSubjectCode || commonTargetCount === 0}
+                        >
+                          Clear from {commonApplyMode === "filtered" ? "Filtered" : "Selected"}
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Workflow: choose whether to target selected rows or all filtered rows, apply one subject, then move to the next subject. Current target: {commonTargetCount} classes.
+                    </p>
+                  </div>
+                )}
 
                 {/* Success / Error messages */}
                 {successMsg && (
@@ -615,19 +887,44 @@ export default function ClassAssignmentPage() {
                                     <div className="relative min-w-[160px]" data-subject-dropdown>
                                       <button
                                         type="button"
-                                        onClick={() => setOpenSubjectDropdown((prev) => prev === c.classId ? null : c.classId)}
+                                        onClick={() => {
+                                          setOpenSubjectDropdown((prev) => prev === c.classId ? null : c.classId);
+                                          setSubjectSearchByClass((prev) => ({ ...prev, [c.classId]: prev[c.classId] || "" }));
+                                        }}
                                         className="h-7 w-full rounded border bg-background px-2 text-xs text-left flex items-center justify-between gap-1"
                                       >
                                         <span className="truncate">
-                                          {(classSubjects[c.classId] || []).length > 0
-                                            ? classSubjects[c.classId].map((s) => `${s.name} (${s.periods})`).join(", ")
-                                            : "— Select —"}
+                                          {formatAssignedSubjects(classSubjects[c.classId] || [])}
                                         </span>
                                         <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
                                       </button>
                                       {openSubjectDropdown === c.classId && (
-                                        <div className="absolute z-50 mt-1 w-72 rounded-md border bg-popover shadow-lg max-h-56 overflow-y-auto">
-                                          {subjects.map((s) => {
+                                        <div className="absolute z-50 mt-1 w-80 rounded-md border bg-popover shadow-lg">
+                                          <div className="border-b p-2">
+                                            <Input
+                                              value={subjectSearchByClass[c.classId] || ""}
+                                              onChange={(e) =>
+                                                setSubjectSearchByClass((prev) => ({
+                                                  ...prev,
+                                                  [c.classId]: e.target.value,
+                                                }))
+                                              }
+                                              placeholder="Search subject..."
+                                              className="h-8 text-sm"
+                                            />
+                                          </div>
+                                          <div className="max-h-64 overflow-y-auto">
+                                          {subjects
+                                            .filter((s) => {
+                                              const query = (subjectSearchByClass[c.classId] || "").toLowerCase();
+                                              if (!query) return true;
+                                              return (
+                                                s.nameEn.toLowerCase().includes(query) ||
+                                                s.nameAr.toLowerCase().includes(query) ||
+                                                s.code.toLowerCase().includes(query)
+                                              );
+                                            })
+                                            .map((s) => {
                                             const entry = (classSubjects[c.classId] || []).find((e) => e.name === s.nameEn);
                                             const isSelected = !!entry;
                                             return (
@@ -655,34 +952,44 @@ export default function ClassAssignmentPage() {
                                                     }}
                                                     className="rounded"
                                                   />
-                                                  <span className="truncate">{s.nameEn}</span>
+                                                  <span className="truncate">{formatSubjectLabel(s, isRTL)}</span>
                                                 </label>
                                                 {isSelected && (
-                                                  <input
-                                                    type="number"
-                                                    min={0}
-                                                    max={50}
-                                                    value={entry!.periods || ""}
-                                                    placeholder="0"
-                                                    onChange={(e) => {
-                                                      const val = parseInt(e.target.value, 10) || 0;
-                                                      setClassSubjects((prev) => {
-                                                        const current = prev[c.classId] || [];
-                                                        return {
-                                                          ...prev,
-                                                          [c.classId]: current.map((x) =>
-                                                            x.name === s.nameEn ? { ...x, periods: val } : x
-                                                          ),
-                                                        };
-                                                      });
-                                                    }}
-                                                    className="w-12 h-6 rounded border bg-background px-1 text-xs text-center"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                  />
+                                                  <div className="flex items-center gap-1">
+                                                    <input
+                                                      type="number"
+                                                      min={0}
+                                                      max={50}
+                                                      value={entry!.periods || ""}
+                                                      placeholder="0"
+                                                      onChange={(e) => {
+                                                        const val = parseInt(e.target.value, 10) || 0;
+                                                        setClassSubjects((prev) => {
+                                                          const current = prev[c.classId] || [];
+                                                          return {
+                                                            ...prev,
+                                                            [c.classId]: current.map((x) =>
+                                                              x.name === s.nameEn ? { ...x, periods: val } : x
+                                                            ),
+                                                          };
+                                                        });
+                                                      }}
+                                                      className="w-12 h-6 rounded border bg-background px-1 text-xs text-center"
+                                                      onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => removeSubjectForClass(c.classId, s.nameEn)}
+                                                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                                    >
+                                                      <X className="h-3 w-3" />
+                                                    </button>
+                                                  </div>
                                                 )}
                                               </div>
                                             );
                                           })}
+                                          </div>
                                         </div>
                                       )}
                                     </div>

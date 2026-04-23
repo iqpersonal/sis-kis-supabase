@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { CACHE_SHORT } from "@/lib/cache-headers";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /**
  * GET /api/attendance?date=YYYY-MM-DD&classCode=XX&sectionCode=XX&year=XX-XX&school=XXXX-XX
@@ -136,7 +137,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    students.sort((a, b) => a.student_name.localeCompare(b.student_name));
+    students.sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
 
     // Fetch existing attendance records for this date + class
     const attendanceSnap = await adminDb
@@ -227,19 +228,22 @@ export async function POST(req: NextRequest) {
     let created = 0;
     let updated = 0;
 
-    for (const r of records) {
-      // Check if record already exists
-      const existing = await adminDb
-        .collection("daily_attendance")
-        .where("date", "==", date)
-        .where("student_number", "==", r.studentNumber)
-        .limit(1)
-        .get();
+    // Pre-fetch ALL existing records for this date + class in ONE query (eliminates N+1)
+    const existingSnap = await adminDb
+      .collection("daily_attendance")
+      .where("date", "==", date)
+      .where("class_code", "==", classCode)
+      .get();
+    const existingMap = new Map<string, FirebaseFirestore.DocumentReference>();
+    for (const doc of existingSnap.docs) {
+      existingMap.set(doc.data().student_number, doc.ref);
+    }
 
-      if (!existing.empty) {
+    for (const r of records) {
+      const existingRef = existingMap.get(r.studentNumber);
+      if (existingRef) {
         // Update existing
-        const docRef = existing.docs[0].ref;
-        batch.update(docRef, {
+        batch.update(existingRef, {
           status: r.status,
           note: r.note || "",
           updated_at: now,

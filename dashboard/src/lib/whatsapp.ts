@@ -33,6 +33,7 @@ export interface TemplateComponent {
 export interface SendTemplateParams {
   to: string; // E.164 format, e.g. "+966501234567"
   templateName: string;
+  templateId?: string; // Gupshup template UUID — use this when available; more reliable than elementName
   languageCode?: string; // default "ar"
   components?: TemplateComponent[];
 }
@@ -61,7 +62,7 @@ export async function sendTemplate(
     return { messaging_product: "whatsapp", contacts: [{ input: params.to, wa_id: params.to }], messages: [{ id: "not-configured" }] };
   }
   const { apiKey, sourcePhone, appName } = config;
-  const { to, templateName, languageCode = "ar", components } = params;
+  const { to, templateName, templateId, languageCode = "ar", components } = params;
   const dest = normalizePhone(to).replace("+", "");
 
   // Extract template parameters from components
@@ -74,8 +75,9 @@ export async function sendTemplate(
     }
   }
 
+  // Prefer UUID over element name — Gupshup reliably accepts UUID; element name causes 4003
   const templateObj: Record<string, unknown> = {
-    id: templateName,
+    id: templateId || templateName,
     params: templateParams,
   };
 

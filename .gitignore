@@ -47,6 +47,8 @@ gen_transcript*.log
 mirror_log.txt
 deploy_log*.txt
 scripts/*.log
+scripts/*.pdf
+*.pdf
 
 # ── Firebase cache ──
 .firebase/

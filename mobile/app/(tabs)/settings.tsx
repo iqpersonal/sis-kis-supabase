@@ -6,7 +6,7 @@ import { colors, spacing, fontSize, radius, commonStyles } from "@/lib/theme";
 
 export default function SettingsTab() {
   const router = useRouter();
-  const { user, role, signOut } = useAuth();
+  const { user, roles, signOut } = useAuth();
 
   const handleSignOut = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -40,7 +40,7 @@ export default function SettingsTab() {
             </Text>
             <Text style={styles.profileEmail}>{user?.email}</Text>
             <View style={styles.roleBadge}>
-              <Text style={styles.roleText}>{role || "admin"}</Text>
+              <Text style={styles.roleText}>{roles?.join(", ") || "admin"}</Text>
             </View>
           </View>
         </View>

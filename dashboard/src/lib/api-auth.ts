@@ -61,7 +61,24 @@ export async function verifyAuth(req: NextRequest): Promise<AuthResult> {
   try {
     const decoded = await adminAuth.verifyIdToken(token);
     const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    const role = (snap.exists ? snap.data()?.role : "viewer") as Role;
+    const data = snap.exists ? snap.data() : null;
+
+    // Support both new `roles` array and legacy `role` string
+    let role: Role;
+    if (data?.roles && Array.isArray(data.roles) && data.roles.length > 0) {
+      // Pick the "highest privilege" role from the array for single-role checks
+      const PRIORITY: Role[] = [
+        "super_admin", "school_admin", "it_admin", "it_manager",
+        "academic_director", "head_of_section", "subject_coordinator", "academic",
+        "finance", "accounts", "registrar", "teacher", "librarian",
+        "store_clerk", "bookshop", "admissions", "viewer",
+      ];
+      role = (data.roles as Role[]).sort(
+        (a, b) => PRIORITY.indexOf(a) - PRIORITY.indexOf(b)
+      )[0] ?? "viewer";
+    } else {
+      role = (data?.role ?? "viewer") as Role;
+    }
 
     return { ok: true, uid: decoded.uid, role };
   } catch {

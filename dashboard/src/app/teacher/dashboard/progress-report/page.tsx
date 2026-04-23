@@ -105,10 +105,13 @@ export default function TeacherProgressReportPage() {
 
   /* ── Fetch assigned classes ── */
   useEffect(() => {
-    if (!teacher?.username) return;
+    if (!teacher?.uid) return;
     setLoadingClasses(true);
+    const param = teacher.username
+      ? `username=${encodeURIComponent(teacher.username)}`
+      : `uid=${encodeURIComponent(teacher.uid)}`;
 
-    fetch(`/api/teacher/classes?username=${encodeURIComponent(teacher.username)}`)
+    fetch(`/api/teacher/classes?${param}`)
       .then((r) => r.json())
       .then((data) => {
         setAssignedClasses(data.classes || []);

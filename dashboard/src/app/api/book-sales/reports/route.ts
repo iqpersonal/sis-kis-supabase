@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { CACHE_SHORT } from "@/lib/cache-headers";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /**
  * Book Sales — Reports API
@@ -287,8 +288,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Sort by grade then name
-      unpaid.sort((a, b) => a.grade.localeCompare(b.grade) || a.student_name.localeCompare(b.student_name));
+      unpaid.sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name) || a.grade.localeCompare(b.grade));
 
       return NextResponse.json({
         unpaid,

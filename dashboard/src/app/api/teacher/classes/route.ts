@@ -4,30 +4,42 @@ import { getCached, setCache } from "@/lib/cache";
 import { CACHE_PRIVATE } from "@/lib/cache-headers";
 
 /**
- * GET /api/teacher/classes?username=...
+ * GET /api/teacher/classes?username=... OR ?uid=...
  * Returns classes assigned to the teacher via the assigned_classes field.
  * Falls back to name-matching if no explicit assignments exist.
  */
 export async function GET(req: NextRequest) {
   const username = req.nextUrl.searchParams.get("username");
-  if (!username) {
-    return NextResponse.json({ error: "username required" }, { status: 400 });
+  const uid = req.nextUrl.searchParams.get("uid");
+
+  if (!username && !uid) {
+    return NextResponse.json({ error: "username or uid required" }, { status: 400 });
   }
 
   try {
-    // Find teacher doc by username
-    const teacherSnap = await adminDb
-      .collection("admin_users")
-      .where("username", "==", username)
-      .where("role", "==", "teacher")
-      .limit(1)
-      .get();
+    let teacherData: FirebaseFirestore.DocumentData;
 
-    if (teacherSnap.empty) {
-      return NextResponse.json({ classes: [] });
+    if (uid) {
+      // Direct lookup by doc ID (Firebase UID)
+      const teacherDoc = await adminDb.collection("admin_users").doc(uid).get();
+      if (!teacherDoc.exists) {
+        return NextResponse.json({ classes: [] });
+      }
+      teacherData = teacherDoc.data()!;
+    } else {
+      // Find teacher doc by username
+      const teacherSnap = await adminDb
+        .collection("admin_users")
+        .where("username", "==", username)
+        .where("role", "==", "teacher")
+        .limit(1)
+        .get();
+
+      if (teacherSnap.empty) {
+        return NextResponse.json({ classes: [] });
+      }
+      teacherData = teacherSnap.docs[0].data();
     }
-
-    const teacherData = teacherSnap.docs[0].data();
 
     interface ClassInfo {
       id: string;

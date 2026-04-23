@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAcademicYear } from "@/context/academic-year-context";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 import { useSchoolFilter } from "@/context/school-filter-context";
 import { useLanguage } from "@/context/language-context";
 import { cn } from "@/lib/utils";
@@ -160,7 +161,7 @@ export default function FeeManagementPage() {
       );
     }
     return true;
-  }).sort((a, b) => a.student_name.localeCompare(b.student_name));
+  }).sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
 
   const handleRecordPayment = async () => {
     if (!selectedStudent || !paymentAmount) return;

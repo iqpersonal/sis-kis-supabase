@@ -59,7 +59,7 @@ interface SectionEntry {
   count: number;
 }
 
-type ReportType = "transcript" | "report_card" | "class_report";
+type ReportType = "transcript" | "report_card" | "class_report" | "subject_performance" | "student_progress_detail";
 
 /* ── Page ─────────────────────────────────────────────────────────── */
 
@@ -199,6 +199,51 @@ export default function PDFReportsPage() {
         return;
       }
 
+      if (reportType === "subject_performance") {
+        const res = await fetch("/api/pdf-reports", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            type: "subject_performance",
+            year: selectedYear,
+            classCode: classFilter !== "all" ? classFilter : "",
+            sectionCode: sectionFilter !== "all" ? sectionFilter : "",
+            school: schoolFilter,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed");
+        const suffix = [classFilter !== "all" ? classFilter : "", sectionFilter !== "all" ? sectionFilter : ""].filter(Boolean).join("_");
+        await downloadBlob(res, `subject_performance_${selectedYear}${suffix ? "_" + suffix : ""}.pdf`);
+        return;
+      }
+
+      // ── Student Progress Detail ──
+      if (reportType === "student_progress_detail") {
+        const studentIds = Array.from(selected);
+        if (!studentIds.length) {
+          setError("Please select at least one student");
+          return;
+        }
+        for (const sid of studentIds) {
+          const res = await fetch("/api/pdf-reports", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              type: "student_progress_detail",
+              studentNumber: sid,
+              year: selectedYear,
+            }),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            console.error(`Progress detail error for ${sid}:`, errData);
+            continue;
+          }
+          await downloadBlob(res, `progress_detail_${sid}_${selectedYear}.pdf`);
+        }
+        return;
+      }
+
       // Individual student PDFs
       const studentIds = Array.from(selected);
       if (!studentIds.length) {
@@ -274,6 +319,22 @@ export default function PDFReportsPage() {
       desc:
         t("pdfClassReportDesc" as never) ||
         "Class-wide performance summary with rankings and pass/fail statistics",
+    },
+    {
+      type: "subject_performance",
+      icon: Filter,
+      title: t("pdfSubjectPerf" as never) || "Subject Performance",
+      desc:
+        t("pdfSubjectPerfDesc" as never) ||
+        "Per-subject class averages across T1 Assessment, T1 Final, Sem 1, T2 Assessment, T2 Final, Sem 2, and Annual",
+    },
+    {
+      type: "student_progress_detail",
+      icon: ClipboardList,
+      title: t("pdfProgressDetail" as never) || "Student Progress Detail",
+      desc:
+        t("pdfProgressDetailDesc" as never) ||
+        "Individual quiz & test marks per subject with T1/T2 breakdowns, semester totals, and annual grade",
     },
   ];
 
@@ -363,7 +424,7 @@ export default function PDFReportsPage() {
       )}
 
       {/* ── Student Selection (not for class_report) ──────── */}
-      {reportType !== "class_report" ? (
+      {reportType !== "class_report" && reportType !== "subject_performance" ? (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -576,7 +637,7 @@ export default function PDFReportsPage() {
           onClick={handleGenerate}
           disabled={
             generating ||
-            (reportType !== "class_report" && selected.size === 0)
+            (reportType !== "class_report" && reportType !== "subject_performance" && selected.size === 0)
           }
           className="gap-2"
         >
@@ -588,7 +649,7 @@ export default function PDFReportsPage() {
           {generating
             ? t("pdfGenerating" as never) || "Generating..."
             : t("pdfDownload" as never) || "Download PDF"}
-          {reportType !== "class_report" &&
+          {reportType !== "class_report" && reportType !== "subject_performance" &&
             selected.size > 0 &&
             ` (${selected.size})`}
         </Button>

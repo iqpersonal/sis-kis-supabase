@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { CACHE_PRIVATE } from "@/lib/cache-headers";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /**
  * GET /api/teacher/students?classId=SECTION_DOC_ID&year=25-26
@@ -223,7 +224,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    students.sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+    students.sort((a, b) => compareAlphabeticalNames(a.nameEn, b.nameEn));
 
     return NextResponse.json({ students }, {
       headers: { "Cache-Control": "no-store" },

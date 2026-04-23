@@ -4,6 +4,10 @@ import { FieldValue } from "firebase-admin/firestore";
 import { CACHE_SHORT, CACHE_MEDIUM } from "@/lib/cache-headers";
 import { verifyAuth } from "@/lib/api-auth";
 
+// markOverdue cooldown — only scan+write at most once every 5 minutes per server instance
+let lastMarkOverdueRun = 0;
+const MARK_OVERDUE_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
  * Library Management API
  *
@@ -191,6 +195,70 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Reports ──
+    // ── Lookup Copy by barcode (mobile librarian) ──
+    if (action === "lookup_copy") {
+      const barcode = req.nextUrl.searchParams.get("barcode");
+      if (!barcode) {
+        return NextResponse.json({ error: "barcode is required" }, { status: 400 });
+      }
+      const copySnap = await adminDb
+        .collection("library_copies")
+        .where("barcode", "==", barcode)
+        .limit(1)
+        .get();
+      if (copySnap.empty) {
+        return NextResponse.json({ error: "Barcode not found" }, { status: 404 });
+      }
+      const copyDoc = copySnap.docs[0];
+      const copyData = copyDoc.data();
+      const bookDoc = await adminDb.collection("library_books").doc(copyData.book_id).get();
+      if (!bookDoc.exists) {
+        return NextResponse.json({ error: "Book record not found" }, { status: 404 });
+      }
+
+      // Find active borrowing for this copy (if any)
+      let activeBorrowing: Record<string, unknown> | null = null;
+      if (copyData.status !== "available") {
+        const borrowSnap = await adminDb
+          .collection("library_borrowings")
+          .where("copy_id", "==", copyDoc.id)
+          .where("status", "in", ["borrowed", "overdue"])
+          .limit(1)
+          .get();
+        if (!borrowSnap.empty) {
+          activeBorrowing = { id: borrowSnap.docs[0].id, ...borrowSnap.docs[0].data() };
+        }
+      }
+
+      return NextResponse.json({
+        copy: { id: copyDoc.id, ...copyData },
+        book: { id: bookDoc.id, ...bookDoc.data() },
+        active_borrowing: activeBorrowing,
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    // ── Find Duplicates ──
+    if (action === "find_duplicates") {
+      const snap = await adminDb.collection("library_books").get();
+      const groups = new Map<string, Array<{ id: string; title: string; author: string; total_copies: number; created_at: unknown }>>();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        const key = [
+          String(d.title ?? "").toLowerCase().trim(),
+          String(d.author ?? "").toLowerCase().trim(),
+        ].join("|");
+        const arr = groups.get(key) ?? [];
+        arr.push({ id: doc.id, title: d.title, author: d.author, total_copies: d.total_copies ?? 0, created_at: d.created_at });
+        groups.set(key, arr);
+      }
+      const duplicates = [...groups.values()].filter((g) => g.length > 1);
+      return NextResponse.json({
+        duplicate_groups: duplicates.length,
+        total_extra_docs: duplicates.reduce((s, g) => s + g.length - 1, 0),
+        groups: duplicates,
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
+
     if (action === "reports") {
       const reportType = req.nextUrl.searchParams.get("type") || "most_borrowed";
 
@@ -719,6 +787,169 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: "Book deleted" });
     }
 
+    // ── Bulk Import Books ──
+    if (action === "bulk_import_books") {
+      const { books } = body as { books: Record<string, string | number>[] };
+      if (!Array.isArray(books) || books.length === 0) {
+        return NextResponse.json({ error: "books array is required" }, { status: 400 });
+      }
+      if (books.length > 5000) {
+        return NextResponse.json({ error: "Maximum 5000 books per import" }, { status: 400 });
+      }
+
+      // Collect non-empty ISBNs to check for existing duplicates
+      const incomingIsbns = [...new Set(
+        books.map((b) => String(b["ISBN"] ?? b.isbn ?? "").trim()).filter(Boolean)
+      )];
+
+      const existingIsbns = new Set<string>();
+      if (incomingIsbns.length > 0) {
+        const CHUNK = 30;
+        for (let ci = 0; ci < incomingIsbns.length; ci += CHUNK) {
+          const chunk = incomingIsbns.slice(ci, ci + CHUNK);
+          const snap = await adminDb
+            .collection("library_books")
+            .where("isbn", "in", chunk)
+            .get();
+          snap.docs.forEach((d) => existingIsbns.add(String(d.data().isbn)));
+        }
+      }
+
+      let added = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      // Batch writer — auto-commits and starts a fresh batch when approaching the 500-write limit
+      let currentBatch = adminDb.batch();
+      let opsInBatch = 0;
+
+      async function flushBatch() {
+        if (opsInBatch > 0) {
+          await currentBatch.commit();
+          currentBatch = adminDb.batch();
+          opsInBatch = 0;
+        }
+      }
+
+      for (const row of books) {
+        const title = String(row["Book Title"] ?? row.title ?? "").trim();
+        if (!title) { errors.push("Row missing Book Title — skipped"); continue; }
+
+        const isbn = String(row["ISBN"] ?? row.isbn ?? "").trim();
+        if (isbn && existingIsbns.has(isbn)) { skipped++; continue; }
+
+        const totalCopies = Math.max(1, Number(row["Quantity"] ?? row.total_copies ?? 1) || 1);
+
+        // Flush before writing if we'd exceed the 500-op batch limit
+        if (opsInBatch + 1 + totalCopies > 490) await flushBatch();
+
+        const bookRef = adminDb.collection("library_books").doc();
+        currentBatch.set(bookRef, {
+          title,
+          title_ar: "",
+          author: String(row["Author"] ?? row.author ?? "").trim(),
+          isbn,
+          category: String(row["Genre"] ?? row.category ?? "").trim(),
+          language: "English",
+          publication_year: null,
+          publisher: String(row["Publisher"] ?? row.publisher ?? "").trim(),
+          age_group: String(row["Age Group"] ?? row.age_group ?? "").trim(),
+          grade_level: String(row["Grade Level"] ?? row.grade_level ?? "").trim(),
+          pages: Number(row["# of Pages"] ?? row.pages ?? 0) || null,
+          call_number: String(row["Book Number"] ?? row.call_number ?? "").trim(),
+          total_copies: totalCopies,
+          available_copies: totalCopies,
+          cover_url: "",
+          created_at: FieldValue.serverTimestamp(),
+        });
+        opsInBatch++;
+
+        const shelfLocation =
+          String(row["Bookshelf Number"] ?? row.location ?? "").trim() || "Main Library";
+        for (let ci = 1; ci <= totalCopies; ci++) {
+          const copyRef = adminDb.collection("library_copies").doc();
+          currentBatch.set(copyRef, {
+            book_id: bookRef.id,
+            barcode: `KIS-${bookRef.id.slice(0, 6).toUpperCase()}-${String(ci).padStart(3, "0")}`,
+            status: "available",
+            location: shelfLocation,
+            condition: "good",
+            created_at: FieldValue.serverTimestamp(),
+          });
+          opsInBatch++;
+        }
+
+        if (isbn) existingIsbns.add(isbn); // deduplicate within the same import
+        added++;
+      }
+
+      await flushBatch(); // commit any remaining writes
+
+      return NextResponse.json({
+        success: true,
+        added,
+        skipped,
+        errors: errors.slice(0, 20),
+        message: `${added} book${added !== 1 ? "s" : ""} added, ${skipped} skipped (duplicate ISBN)`,
+      });
+    }
+
+    // ── Remove Duplicates ──
+    if (action === "remove_duplicates") {
+      const booksSnap = await adminDb.collection("library_books").get();
+      const seen = new Map<string, { id: string; copies: number }>();
+      const toDelete: string[] = [];
+
+      for (const doc of booksSnap.docs) {
+        const d = doc.data();
+        const key = [
+          String(d.title ?? "").toLowerCase().trim(),
+          String(d.author ?? "").toLowerCase().trim(),
+        ].join("|");
+        const existing = seen.get(key);
+        if (existing) {
+          // Keep the one with more copies; delete the other
+          if ((d.total_copies ?? 0) > existing.copies) {
+            toDelete.push(existing.id);
+            seen.set(key, { id: doc.id, copies: d.total_copies ?? 0 });
+          } else {
+            toDelete.push(doc.id);
+          }
+        } else {
+          seen.set(key, { id: doc.id, copies: d.total_copies ?? 0 });
+        }
+      }
+
+      if (toDelete.length === 0) {
+        return NextResponse.json({ removed: 0, message: "No duplicates found" });
+      }
+
+      // Fetch ALL copies in one query and filter in memory (avoids N round-trips)
+      const toDeleteSet = new Set(toDelete);
+      const allCopiesSnap = await adminDb.collection("library_copies").get();
+      const copyRefsToDelete = allCopiesSnap.docs
+        .filter((d) => toDeleteSet.has(String(d.data().book_id ?? "")))
+        .map((d) => d.ref);
+
+      // Batch-delete copies + book docs (500 ops max per batch)
+      const allRefs = [
+        ...copyRefsToDelete,
+        ...toDelete.map((id) => adminDb.collection("library_books").doc(id)),
+      ];
+      const BATCH_SIZE = 490;
+      for (let i = 0; i < allRefs.length; i += BATCH_SIZE) {
+        const deleteBatch = adminDb.batch();
+        allRefs.slice(i, i + BATCH_SIZE).forEach((ref) => deleteBatch.delete(ref));
+        await deleteBatch.commit();
+      }
+      const removed = toDelete.length;
+
+      return NextResponse.json({
+        removed,
+        message: `${removed} duplicate book${removed !== 1 ? "s" : ""} removed`,
+      });
+    }
+
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
     console.error("Library POST error:", err);
@@ -731,7 +962,12 @@ export async function POST(req: NextRequest) {
 
 /* ── Helper: mark overdue borrowings ──────────────────────────── */
 async function markOverdue() {
-  const now = new Date().toISOString();
+  // Throttle: skip if already ran within the last 5 minutes
+  const now = Date.now();
+  if (now - lastMarkOverdueRun < MARK_OVERDUE_INTERVAL_MS) return;
+  lastMarkOverdueRun = now;
+
+  const nowIso = new Date().toISOString();
   const snap = await adminDb
     .collection("library_borrowings")
     .where("status", "==", "borrowed")
@@ -741,7 +977,7 @@ async function markOverdue() {
   let updated = 0;
   for (const doc of snap.docs) {
     const dueDate = doc.data().due_date;
-    if (dueDate && dueDate < now) {
+    if (dueDate && dueDate < nowIso) {
       batch.update(doc.ref, { status: "overdue" });
       updated++;
     }

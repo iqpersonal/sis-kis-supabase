@@ -181,8 +181,8 @@ export async function POST(req: NextRequest) {
 
       await adminDb.collection("admin_users").doc(uid).set(userDoc, { merge: true });
 
-      // Send welcome email for newly created accounts
-      if (action === "created") {
+      // Send welcome email for newly created accounts (skip for teachers)
+      if (action === "created" && role !== "teacher") {
         const tpl = bulkWelcomeEmail({
           displayName: fullName || email.split("@")[0],
           email,

@@ -35,6 +35,8 @@ interface StudentFee {
 // ── In-memory cache for fee data (10-min TTL) ──
 let feeCache: { data: unknown; ts: number; key: string } | null = null;
 const FEE_CACHE_TTL = 10 * 60 * 1000;
+// Bust cache on server restart so status logic changes take effect immediately
+feeCache = null;
 
 // ── GET ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -145,7 +147,7 @@ export async function GET(req: NextRequest) {
       if (schoolParam !== "all" && school !== schoolParam) continue;
 
       const status: StudentFee["status"] =
-        fin.balance <= 0 && fin.total_paid > 0
+        fin.balance <= 0
           ? fin.total_paid > fin.total_charged
             ? "overpaid"
             : "paid"

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { CACHE_SHORT } from "@/lib/cache-headers";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /**
  * GET /api/bulk-export
@@ -135,7 +136,7 @@ export async function GET(req: NextRequest) {
     students.sort((a, b) => {
       const cc = a.class_code.localeCompare(b.class_code);
       if (cc !== 0) return cc;
-      return a.student_name.localeCompare(b.student_name);
+      return compareAlphabeticalNames(a.student_name, b.student_name);
     });
 
     const classes = Array.from(classesMap.values()).sort((a, b) =>

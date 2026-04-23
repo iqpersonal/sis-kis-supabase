@@ -44,8 +44,8 @@ function ItemRow({ item, config, onPress }: { item: StoreItem; config: StoreConf
 }
 
 export default function InventoryScreen() {
-  const { role } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles } = useAuth();
+  const access = getStoreAccess(roles);
   const router = useRouter();
 
   const [activeStore, setActiveStore] = useState<StoreConfig>(

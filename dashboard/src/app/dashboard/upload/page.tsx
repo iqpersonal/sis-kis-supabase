@@ -20,6 +20,7 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
+import { useAcademicYear } from "@/context/academic-year-context";
 
 type UploadMode = "file" | "bak";
 type Status = "idle" | "uploading" | "success" | "error";
@@ -80,13 +81,13 @@ export default function UploadPage() {
 
 function ManualSyncCard() {
   const [syncMode, setSyncMode] = useState<"quick" | "full" | "year">("quick");
-  const [selectedYear, setSelectedYear] = useState("");
   const [availableYears, setAvailableYears] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState("");
   const [logLines, setLogLines] = useState<string[]>([]);
+  const { selectedYear, setSelectedYear, locked: yearLocked } = useAcademicYear();
 
   // Fetch available academic years from Firestore
   useEffect(() => {
@@ -221,8 +222,9 @@ function ManualSyncCard() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Academic Year</label>
               <select
-                value={selectedYear}
+                value={selectedYear || ""}
                 onChange={(e) => setSelectedYear(e.target.value)}
+                disabled={yearLocked}
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {availableYears.map((y) => (

@@ -109,8 +109,8 @@ function CartRow({
 /* ── Main Screen ─────────────────────────────────────────────────── */
 
 export default function NewRequestScreen() {
-  const { role, user } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles, user } = useAuth();
+  const access = getStoreAccess(roles);
   const router = useRouter();
 
   const [activeStore, setActiveStore] = useState<StoreConfig>(

@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 import {
   Dialog,
   DialogContent,
@@ -171,7 +172,7 @@ export default function TransfersPage() {
       );
     }
     return true;
-  }).sort((a, b) => a.student_name.localeCompare(b.student_name));
+  }).sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
 
   const handleCreate = async () => {
     if (!newStudentNumber) return;

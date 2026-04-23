@@ -138,8 +138,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Always generate a password-reset link and send a welcome/role email
-    try {
+    // Send welcome/role email — skip for teachers (credentials shared directly)
+    if (role !== "teacher") try {
       const resetLink = await adminAuth.generatePasswordResetLink(email);
       const tpl = teacherWelcomeEmail({
         displayName: userRecord.displayName || email.split("@")[0],

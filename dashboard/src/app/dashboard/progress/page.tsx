@@ -25,6 +25,11 @@ import {
   Printer,
   FileText,
   User,
+  Sparkles,
+  Target,
+  Lightbulb,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import {
@@ -59,6 +64,7 @@ import {
 } from "@/hooks/use-sis-data";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -182,7 +188,7 @@ export default function StudentProgressPage() {
         return;
       }
       const data = await res.json();
-      const sorted = (data.results || []).sort((a: SearchResult, b: SearchResult) => a.student_name.localeCompare(b.student_name));
+      const sorted = (data.results || []).sort((a: SearchResult, b: SearchResult) => compareAlphabeticalNames(a.student_name, b.student_name));
       setResults(sorted);
     } catch (err) {
       console.error("Search failed:", err);
@@ -238,7 +244,7 @@ export default function StudentProgressPage() {
         return;
       }
       const data = await res.json();
-      const sorted = (data.results || []).sort((a: SearchResult, b: SearchResult) => a.student_name.localeCompare(b.student_name));
+      const sorted = (data.results || []).sort((a: SearchResult, b: SearchResult) => compareAlphabeticalNames(a.student_name, b.student_name));
       setResults(sorted);
     } catch (err) {
       console.error("Browse failed:", err);
@@ -340,6 +346,234 @@ export default function StudentProgressPage() {
       [`20${prevYear}`]: prevMap.get(subject) ?? 0,
       [`20${currYear}`]: currMap.get(subject) ?? 0,
     }));
+  }, [progress]);
+
+  /* ── AI Academic Analysis ── */
+  const aiAnalysis = useMemo(() => {
+    if (!progress?.years) return null;
+    const years = Object.keys(progress.years).sort();
+    if (years.length === 0) return null;
+
+    const latestYear = years[years.length - 1];
+    const latestData = progress.years[latestYear];
+    const avgs = years.map((y) => progress.years[y].overall_avg);
+    const firstAvg = avgs[0];
+    const lastAvg = avgs[avgs.length - 1];
+    const overallChange = lastAvg - firstAvg;
+
+    // Recent trend (up to last 3 years)
+    const recentYears = years.slice(-3);
+    const recentAvgs = recentYears.map((y) => progress.years[y].overall_avg);
+    const recentTrend =
+      recentAvgs.length > 1
+        ? recentAvgs[recentAvgs.length - 1] - recentAvgs[0]
+        : 0;
+
+    // Subject consistency across all years
+    const subjectMap: Record<string, number[]> = {};
+    for (const yr of years) {
+      for (const s of progress.years[yr].subjects) {
+        if (!subjectMap[s.subject]) subjectMap[s.subject] = [];
+        subjectMap[s.subject].push(s.grade);
+      }
+    }
+
+    // Consistent strengths: avg ≥ 80 over at least 2 years
+    const strengths = Object.entries(subjectMap)
+      .filter(([, grades]) => {
+        const avg = grades.reduce((a, b) => a + b, 0) / grades.length;
+        return grades.length >= 2 && avg >= 80;
+      })
+      .map(([subj, grades]) => ({
+        subject: subj,
+        avg: Math.round(grades.reduce((a, b) => a + b, 0) / grades.length),
+      }))
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 4);
+
+    // Current weaknesses (latest year subjects < 60)
+    const currentWeaknesses = latestData.subjects
+      .filter((s) => s.grade < 60)
+      .sort((a, b) => a.grade - b.grade);
+
+    // Subjects needing attention (latest year 50–70)
+    const attentionNeeded = latestData.subjects
+      .filter((s) => s.grade >= 50 && s.grade < 70)
+      .sort((a, b) => a.grade - b.grade)
+      .slice(0, 4);
+
+    // Chronically weak subjects (consistently < 65 over 2+ years)
+    const chronicWeak = Object.entries(subjectMap)
+      .filter(([, grades]) => {
+        const avg = grades.reduce((a, b) => a + b, 0) / grades.length;
+        return grades.length >= 2 && avg < 65;
+      })
+      .map(([subj, grades]) => ({
+        subject: subj,
+        avg: Math.round(grades.reduce((a, b) => a + b, 0) / grades.length),
+      }))
+      .sort((a, b) => a.avg - b.avg)
+      .slice(0, 3);
+
+    // Year-over-year subject changes (last 2 years)
+    let mostImproved: { subject: string; change: number } | null = null;
+    let mostDeclined: { subject: string; change: number } | null = null;
+    if (years.length >= 2) {
+      const prevYr = years[years.length - 2];
+      const prevMap = new Map(
+        progress.years[prevYr].subjects.map((s) => [s.subject, s.grade])
+      );
+      const currMap = new Map(
+        latestData.subjects.map((s) => [s.subject, s.grade])
+      );
+      const changes: { subject: string; change: number }[] = [];
+      for (const [subj, currGrade] of currMap) {
+        const prevGrade = prevMap.get(subj);
+        if (prevGrade !== undefined) {
+          changes.push({ subject: subj, change: currGrade - prevGrade });
+        }
+      }
+      if (changes.length > 0) {
+        changes.sort((a, b) => b.change - a.change);
+        if (changes[0].change >= 4) mostImproved = changes[0];
+        if (changes[changes.length - 1].change <= -4)
+          mostDeclined = changes[changes.length - 1];
+      }
+    }
+
+    // Rank context
+    let rankPercentile: string | null = null;
+    if (latestData.rank && latestData.class_size) {
+      const pct = Math.round(
+        ((latestData.class_size - latestData.rank) / latestData.class_size) *
+          100
+      );
+      if (pct >= 90) rankPercentile = "top 10%";
+      else if (pct >= 75) rankPercentile = "top 25%";
+      else if (pct >= 50) rankPercentile = "top half";
+      else rankPercentile = null;
+    }
+
+    // Trend label
+    let trendLabel: string;
+    let trendColor: "emerald" | "blue" | "amber" | "red";
+    if (recentTrend >= 5) {
+      trendLabel = "Improving";
+      trendColor = "emerald";
+    } else if (recentTrend >= 1) {
+      trendLabel = "Slightly Improving";
+      trendColor = "blue";
+    } else if (recentTrend >= -4) {
+      trendLabel = "Stable";
+      trendColor = "amber";
+    } else {
+      trendLabel = "Declining";
+      trendColor = "red";
+    }
+
+    // Performance level
+    let performanceLevel: string;
+    if (lastAvg >= 90) performanceLevel = "Outstanding";
+    else if (lastAvg >= 80) performanceLevel = "Very Good";
+    else if (lastAvg >= 70) performanceLevel = "Good";
+    else if (lastAvg >= 60) performanceLevel = "Satisfactory";
+    else if (lastAvg >= 50) performanceLevel = "Below Average";
+    else performanceLevel = "At Risk";
+
+    // Recommendations
+    const recommendations: string[] = [];
+    if (currentWeaknesses.length > 0) {
+      const subjs = currentWeaknesses
+        .map((s) => `${s.subject} (${s.grade}%)`)
+        .slice(0, 2)
+        .join(" and ");
+      recommendations.push(
+        `Prioritise ${subjs} — currently below passing mark. Extra tutoring or daily practice sessions are strongly advised.`
+      );
+    }
+    if (chronicWeak.length > 0 && currentWeaknesses.length === 0) {
+      const subjs = chronicWeak.map((s) => s.subject).slice(0, 2).join(" and ");
+      recommendations.push(
+        `${subjs} ${chronicWeak.length > 1 ? "have" : "has"} been consistently below 65% across multiple years. A structured support plan is recommended.`
+      );
+    }
+    if (mostDeclined && Math.abs(mostDeclined.change) >= 5) {
+      recommendations.push(
+        `${mostDeclined.subject} dropped significantly (${mostDeclined.change > 0 ? "+" : ""}${mostDeclined.change} pts) compared to last year — identify the root cause early.`
+      );
+    }
+    if (attentionNeeded.length > 0 && currentWeaknesses.length === 0) {
+      const subjs = attentionNeeded
+        .map((s) => s.subject)
+        .slice(0, 2)
+        .join(" and ");
+      recommendations.push(
+        `${subjs} sit in the 50–70% range — targeted practice can move these to passing and improve the overall average.`
+      );
+    }
+    if (mostImproved) {
+      recommendations.push(
+        `${mostImproved.subject} improved by ${mostImproved.change} pts — recognise this progress to keep motivation high.`
+      );
+    }
+    if (strengths.length > 0) {
+      recommendations.push(
+        `Build on the strong foundation in ${strengths[0].subject} — explore competitions or advanced tracks to further develop this talent.`
+      );
+    }
+    if (recentTrend <= -5) {
+      recommendations.push(
+        `Overall performance is trending downward over recent years. A comprehensive academic review with the homeroom teacher and parents is recommended.`
+      );
+    }
+    if (rankPercentile) {
+      recommendations.push(
+        `With a ${rankPercentile} class ranking, the student shows great potential — consistent effort can push this even higher.`
+      );
+    }
+    if (recommendations.length === 0) {
+      recommendations.push(
+        `Continue maintaining consistent study habits. Explore challenging topics in strong subjects to stay engaged and push grades higher.`
+      );
+    }
+
+    // Summary sentence
+    const summaryParts: string[] = [];
+    summaryParts.push(
+      `Over ${years.length} academic year${years.length > 1 ? "s" : ""}, ${progress.student_name || "this student"} has maintained a ${performanceLevel.toLowerCase()} performance level`
+    );
+    if (years.length > 1) {
+      summaryParts.push(
+        overallChange >= 0
+          ? ` with an overall improvement of ${overallChange.toFixed(1)} points`
+          : ` with an overall change of ${overallChange.toFixed(1)} points`
+      );
+    }
+    summaryParts.push(`. Current average stands at ${lastAvg}%`);
+    if (rankPercentile) summaryParts.push(`, ranking in the ${rankPercentile} of the class`);
+    summaryParts.push(".");
+    const summary = summaryParts.join("");
+
+    return {
+      trendLabel,
+      trendColor,
+      recentTrend,
+      overallChange,
+      performanceLevel,
+      summary,
+      strengths,
+      currentWeaknesses,
+      attentionNeeded,
+      chronicWeak,
+      mostImproved,
+      mostDeclined,
+      rankPercentile,
+      recommendations,
+      yearsTracked: years.length,
+      latestAvg: lastAvg,
+      highestAvg: Math.max(...avgs),
+      lowestAvg: Math.min(...avgs),
+    };
   }, [progress]);
 
   /* ── Render ── */
@@ -849,9 +1083,181 @@ export default function StudentProgressPage() {
                 </Card>
               </div>
 
+              {/* ── Academic Analysis ── */}
+              {aiAnalysis && (
+                <Card className="border-violet-200 bg-gradient-to-br from-violet-50 via-purple-50 to-indigo-50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base text-violet-800">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-600">
+                        <Sparkles className="h-4 w-4 text-white" />
+                      </div>
+                      Academic Analysis
+                      <span className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        aiAnalysis.trendColor === "emerald"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : aiAnalysis.trendColor === "blue"
+                          ? "bg-blue-100 text-blue-700"
+                          : aiAnalysis.trendColor === "amber"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700"
+                      }`}>
+                        {aiAnalysis.trendColor === "emerald" ? "↑" : aiAnalysis.trendColor === "red" ? "↓" : "→"}{" "}
+                        {aiAnalysis.trendLabel}
+                      </span>
+                    </CardTitle>
+                    <CardDescription className="text-violet-600/80">
+                      {aiAnalysis.summary}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      {/* Strengths */}
+                      <div className="rounded-xl border border-emerald-200 bg-white/70 p-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100">
+                            <ThumbsUp className="h-3.5 w-3.5 text-emerald-600" />
+                          </div>
+                          <h4 className="text-sm font-semibold text-emerald-700">Strengths</h4>
+                        </div>
+                        {aiAnalysis.strengths.length > 0 ? (
+                          <div className="space-y-2">
+                            {aiAnalysis.strengths.map((s) => (
+                              <div key={s.subject} className="flex items-center justify-between gap-2">
+                                <span className="text-sm text-gray-700 truncate">{s.subject}</span>
+                                <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                                  {s.avg}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            {aiAnalysis.latestAvg >= 70
+                              ? "Performing well overall — keep it up across all subjects."
+                              : "No subject consistently above 80% yet — room to grow in all areas."}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Weaknesses / At Risk */}
+                      <div className="rounded-xl border border-red-200 bg-white/70 p-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-red-100">
+                            <ThumbsDown className="h-3.5 w-3.5 text-red-500" />
+                          </div>
+                          <h4 className="text-sm font-semibold text-red-600">Needs Attention</h4>
+                        </div>
+                        {aiAnalysis.currentWeaknesses.length > 0 ? (
+                          <div className="space-y-2">
+                            {aiAnalysis.currentWeaknesses.slice(0, 3).map((s) => (
+                              <div key={s.subject} className="flex items-center justify-between gap-2">
+                                <span className="text-sm text-gray-700 truncate">{s.subject}</span>
+                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
+                                  {s.grade}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : aiAnalysis.attentionNeeded.length > 0 ? (
+                          <div className="space-y-2">
+                            {aiAnalysis.attentionNeeded.slice(0, 3).map((s) => (
+                              <div key={s.subject} className="flex items-center justify-between gap-2">
+                                <span className="text-sm text-gray-700 truncate">{s.subject}</span>
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+                                  {s.grade}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-emerald-600 font-medium">
+                            ✓ No subjects below 70% this year. Well done!
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Trend Indicators */}
+                      <div className="rounded-xl border border-blue-200 bg-white/70 p-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100">
+                            <Target className="h-3.5 w-3.5 text-blue-600" />
+                          </div>
+                          <h4 className="text-sm font-semibold text-blue-700">Key Insights</h4>
+                        </div>
+                        <div className="space-y-2 text-xs text-gray-600">
+                          <div className="flex items-start gap-1.5">
+                            <span className="mt-0.5 shrink-0">📊</span>
+                            <span>
+                              Best ever: <strong>{aiAnalysis.highestAvg}%</strong> · Lowest: <strong>{aiAnalysis.lowestAvg}%</strong>
+                            </span>
+                          </div>
+                          {aiAnalysis.yearsTracked > 1 && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="mt-0.5 shrink-0">{aiAnalysis.overallChange >= 0 ? "📈" : "📉"}</span>
+                              <span>
+                                {aiAnalysis.overallChange >= 0 ? "+" : ""}{aiAnalysis.overallChange.toFixed(1)} pts overall since first year
+                              </span>
+                            </div>
+                          )}
+                          {aiAnalysis.mostImproved && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="mt-0.5 shrink-0">⬆️</span>
+                              <span>
+                                Most improved: <strong>{aiAnalysis.mostImproved.subject}</strong> (+{aiAnalysis.mostImproved.change} pts)
+                              </span>
+                            </div>
+                          )}
+                          {aiAnalysis.mostDeclined && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="mt-0.5 shrink-0">⬇️</span>
+                              <span>
+                                Biggest drop: <strong>{aiAnalysis.mostDeclined.subject}</strong> ({aiAnalysis.mostDeclined.change} pts)
+                              </span>
+                            </div>
+                          )}
+                          {aiAnalysis.rankPercentile && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="mt-0.5 shrink-0">🏆</span>
+                              <span>Class ranking: <strong>{aiAnalysis.rankPercentile}</strong></span>
+                            </div>
+                          )}
+                          {aiAnalysis.chronicWeak.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="mt-0.5 shrink-0">⚠️</span>
+                              <span>
+                                Chronically weak: {aiAnalysis.chronicWeak.map((s) => s.subject).join(", ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Recommendations */}
+                    <div className="rounded-xl border border-violet-200 bg-white/60 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-100">
+                          <Lightbulb className="h-3.5 w-3.5 text-violet-600" />
+                        </div>
+                        <h4 className="text-sm font-semibold text-violet-700">Recommendations</h4>
+                      </div>
+                      <ul className="space-y-2">
+                        {aiAnalysis.recommendations.map((rec, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
+                              {i + 1}
+                            </span>
+                            {rec}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* ── Year-over-Year Trend ── */}
-              {trendData.length > 1 && (
-                <Card>
+              {trendData.length > 1 && (                <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <TrendingUp className="h-4 w-4" />

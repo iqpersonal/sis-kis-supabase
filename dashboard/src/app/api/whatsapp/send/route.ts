@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
       audience_filter,
       sender,
       templateName,
+      templateId,
       languageCode,
       components,
       text,
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
           await sendTemplate({
             to: phone,
             templateName,
+            templateId,
             languageCode: languageCode || "ar",
             components: components || [],
           });
@@ -139,7 +141,13 @@ async function collectPhones(
 ): Promise<string[]> {
   const phones = new Set<string>();
 
-  if (audience === "family" && filter?.family_number) {
+  if (audience === "manual" && Array.isArray(filter?.phones)) {
+    // Direct phone list — normalize each number and add
+    for (const raw of filter.phones as string[]) {
+      const normalized = normalizePhone(String(raw).trim());
+      if (normalized.length >= 12) phones.add(normalized);
+    }
+  } else if (audience === "family" && filter?.family_number) {
     // Single family
     const snap = await adminDb
       .collection("families")

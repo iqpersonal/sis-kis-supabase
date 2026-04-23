@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useState,
+  useCallback,
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
@@ -27,6 +28,8 @@ interface AcademicYearCtx {
   selectedLabel: string;          // e.g. "2022–2023"
   setSelectedYear: (year: string) => void;
   loading: boolean;
+  locked: boolean;
+  activeYear: string | null;
 }
 
 const AcademicYearContext = createContext<AcademicYearCtx>({
@@ -35,6 +38,8 @@ const AcademicYearContext = createContext<AcademicYearCtx>({
   selectedLabel: "All Years",
   setSelectedYear: () => {},
   loading: true,
+  locked: false,
+  activeYear: null,
 });
 
 export const useAcademicYear = () => useContext(AcademicYearContext);
@@ -56,10 +61,21 @@ function formatYearLabel(code: string): string {
 
 export function AcademicYearProvider({ children }: { children: ReactNode }) {
   const [years, setYears] = useState<string[]>([]);
-  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [selectedYear, setSelectedYearState] = useState<string | null>(null);
+  const [activeYear, setActiveYear] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
-  const { user, loading: authLoading } = useAuth();
+  const { user, role, loading: authLoading } = useAuth();
+  const locked = !(role === "super_admin" || role === "school_admin");
+
+  const setSelectedYearInternal = useCallback((year: string | null) => {
+    setSelectedYearState(year);
+  }, []);
+
+  const setSelectedYear = useCallback((year: string) => {
+    if (locked) return;
+    setSelectedYearInternal(year);
+  }, [locked, setSelectedYearInternal]);
 
   useEffect(() => {
     // Skip Firestore reads on parent portal routes (no Firebase Auth there)
@@ -78,7 +94,8 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
     // Return cached data if still fresh
     if (ayCache && Date.now() - ayCache.ts < AY_CACHE_TTL) {
       setYears(ayCache.years);
-      setSelectedYear(ayCache.defaultYear);
+      setActiveYear(ayCache.defaultYear);
+      setSelectedYearInternal(ayCache.defaultYear);
       setLoading(false);
       return;
     }
@@ -102,7 +119,8 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
           const defaultYear = currentDoc
             ? String(currentDoc.Academic_Year)
             : unique[0] ?? null;
-          setSelectedYear(defaultYear);
+          setActiveYear(defaultYear);
+          setSelectedYearInternal(defaultYear);
           ayCache = { years: unique, defaultYear, ts: Date.now() };
           setLoading(false);
           return;
@@ -119,7 +137,8 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
         });
         const sorted = [...yearSet].sort().reverse(); // newest first
         setYears(sorted);
-        setSelectedYear(sorted[0] ?? null);
+        setActiveYear(sorted[0] ?? null);
+        setSelectedYearInternal(sorted[0] ?? null);
         ayCache = { years: sorted, defaultYear: sorted[0] ?? null, ts: Date.now() };
       } catch (err) {
         console.error("Failed to discover academic years:", err);
@@ -127,7 +146,14 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     })();
-  }, [user, authLoading, pathname]);
+  }, [user, authLoading, pathname, locked]);
+
+  // Non-admin roles are always pinned to the active year.
+  useEffect(() => {
+    if (!locked) return;
+    if (!activeYear) return;
+    if (selectedYear !== activeYear) setSelectedYearInternal(activeYear);
+  }, [locked, activeYear, selectedYear]);
 
   const selectedLabel = selectedYear
     ? formatYearLabel(selectedYear)
@@ -135,7 +161,7 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
 
   return (
     <AcademicYearContext.Provider
-      value={{ years, selectedYear, selectedLabel, setSelectedYear, loading }}
+      value={{ years, selectedYear, selectedLabel, setSelectedYear, loading, locked, activeYear }}
     >
       {children}
     </AcademicYearContext.Provider>

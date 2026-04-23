@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 const COLLECTION = "kg_assessments";
 const DOMAINS_COLLECTION = "kg_skill_domains";
@@ -279,7 +280,7 @@ export async function GET(req: NextRequest) {
       });
 
       return NextResponse.json({
-        students: unique.sort((a, b) => a.student_name.localeCompare(b.student_name)),
+        students: unique.sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name)),
       });
     }
 

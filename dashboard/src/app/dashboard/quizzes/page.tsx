@@ -5,6 +5,8 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState, useCallback } from "react";
 import { useLanguage } from "@/context/language-context";
 import { useAuth } from "@/context/auth-context";
+import { useAcademicYear } from "@/context/academic-year-context";
+import { useSchoolFilter } from "@/context/school-filter-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,6 +79,7 @@ interface Assignment {
   adaptive: boolean;
   duration_minutes: number;
   created_by: string;
+  sis_school?: string;
   stats?: { started: number; completed: number; avg_score: number };
   created_at?: any;
 }
@@ -114,6 +117,8 @@ interface QuestionOption {
 export default function QuizzesPage() {
   const { t } = useLanguage();
   const { user, role, can } = useAuth();
+  const { selectedYear, selectedLabel } = useAcademicYear();
+  const { schoolFilter, schoolLabel } = useSchoolFilter();
 
   const isTeacher = role === "teacher";
   const canManage = can("quizzes.manage");
@@ -163,27 +168,31 @@ export default function QuizzesPage() {
     setLoading(true);
     try {
       const fireDb = getDb();
+      const targetYear = selectedYear || "25-26";
 
       // Fetch assignments — teacher sees only their own
       const aSnap = await getDocs(
-        query(collection(fireDb, "quiz_assignments"), where("year", "==", "25-26"))
+        query(collection(fireDb, "quiz_assignments"), where("year", "==", targetYear))
       );
       let aData = aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Assignment));
       if (isTeacher && userEmail) {
         aData = aData.filter((a) => a.created_by === userEmail);
       }
+      if (schoolFilter !== "all") {
+        aData = aData.filter((a) => !a.sis_school || a.sis_school === schoolFilter);
+      }
       setAssignments(aData);
 
       // Fetch question count — teacher sees only questions they created
       const qQuery = isTeacher && userEmail
-        ? query(collection(fireDb, "quiz_questions"), where("year", "==", "25-26"), where("created_by", "==", userEmail))
-        : query(collection(fireDb, "quiz_questions"), where("year", "==", "25-26"));
+        ? query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), where("created_by", "==", userEmail))
+        : query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear));
       const qSnap = await getDocs(qQuery);
       setQuestions(qSnap.size);
 
       // Fetch results — teacher sees only results from their assignments
       const rSnap = await getDocs(
-        query(collection(fireDb, "quiz_results"), where("year", "==", "25-26"))
+        query(collection(fireDb, "quiz_results"), where("year", "==", targetYear))
       );
       let rData = rSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Result));
       if (isTeacher && userEmail) {
@@ -196,7 +205,7 @@ export default function QuizzesPage() {
     } finally {
       setLoading(false);
     }
-  }, [isTeacher, userEmail]);
+  }, [isTeacher, userEmail, selectedYear, schoolFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -214,7 +223,7 @@ export default function QuizzesPage() {
         const qSnap = await getDocs(
           query(
             collection(fireDb, "quiz_questions"),
-            where("year", "==", "25-26"),
+            where("year", "==", selectedYear || "25-26"),
             where("class_code", "==", createBandCode),
           )
         );
@@ -236,7 +245,7 @@ export default function QuizzesPage() {
         setQuestionsLoading(false);
       }
     })();
-  }, [createBandCode, createOpen]);
+  }, [createBandCode, createOpen, selectedYear]);
 
   // Filter available questions by subject
   const matchingQuestions = createSubject
@@ -307,7 +316,7 @@ export default function QuizzesPage() {
             sis_section_code: sisSectionCode,
             sis_school: sisSchool,
             question_ids: matchingQuestions.map((q) => q.id),
-            year: "25-26",
+            year: selectedYear || "25-26",
             duration_minutes: parseInt(createDuration) || 40,
             created_by: userEmail,
             adaptive: true,
@@ -370,12 +379,21 @@ export default function QuizzesPage() {
     ? assignments
     : assignments.filter((a) => a.status === filterStatus);
 
+  const scopedAssignedClasses = assignedClasses.filter((assigned) => {
+    if (selectedYear && assigned.year && assigned.year !== selectedYear) return false;
+    if (schoolFilter !== "all") {
+      const mappedCampus = assigned.campus === "Boys" ? "0021-01" : assigned.campus === "Girls" ? "0021-02" : "";
+      if (mappedCampus && mappedCampus !== schoolFilter) return false;
+    }
+    return true;
+  });
+
   // Derive unique class codes from teacher's assigned classes
-  const teacherClassCodes = [...new Set(assignedClasses.map((c) => c.className))];
+  const teacherClassCodes = [...new Set(scopedAssignedClasses.map((c) => c.className))];
   // Derive teacher's assigned subjects
-  const teacherSubjects = [...new Set(assignedClasses.map((c) => c.subject).filter(Boolean))] as string[];
+  const teacherSubjects = [...new Set(scopedAssignedClasses.map((c) => c.subject).filter(Boolean))] as string[];
   // Derive sections for selected class in create dialog
-  const sectionsForClass = assignedClasses
+  const sectionsForClass = scopedAssignedClasses
     .filter((c) => c.className === createClassCode)
     .map((c) => c.section);
 
@@ -398,7 +416,9 @@ export default function QuizzesPage() {
             Quizzes & Assessments
           </h1>
           <p className="text-muted-foreground mt-1">
-            {isTeacher ? "Your quizzes and student results" : "School-wide overview of adaptive quizzes"} — 2025–2026
+            {isTeacher ? "Your quizzes and student results" : "School-wide overview of adaptive quizzes"}
+            {selectedLabel ? ` — ${selectedLabel}` : ""}
+            {schoolFilter !== "all" ? ` — ${schoolLabel}` : ""}
           </p>
         </div>
 

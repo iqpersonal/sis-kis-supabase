@@ -3,6 +3,8 @@ import { adminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { verifyAdmin } from "@/lib/api-auth";
 
+export const dynamic = "force-dynamic";
+
 /**
  * POST /api/messages/send
  * Send a custom message from the dashboard to parents.

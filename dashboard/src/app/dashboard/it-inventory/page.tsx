@@ -47,9 +47,11 @@ import {
   XCircle,
   ArrowRightLeft,
   RotateCcw,
+  QrCode,
 } from "lucide-react";
 import type { ITAsset, AssetType, AssetStatus, AssetCondition } from "@/types/sis";
 import { useAuth } from "@/context/auth-context";
+import AssetLabelGenerator, { type AssetLabelItem } from "@/components/inventory/asset-label-generator";
 
 const BRANCH_OPTIONS: Record<string, string> = {
   "0021-01": "Boys' School (0021-01)",
@@ -136,6 +138,7 @@ export default function ITInventoryPage() {
   const [showAssign, setShowAssign] = useState(false);
   const [showReturn, setShowReturn] = useState(false);
   const [showCsv, setShowCsv] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<ITAsset | null>(null);
   const [saving, setSaving] = useState(false);
@@ -407,6 +410,10 @@ export default function ITInventoryPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowLabels(true)}>
+            <QrCode className="mr-2 h-4 w-4" />
+            Print Labels
+          </Button>
           <Button variant="outline" onClick={() => setShowCsv(true)}>
             <Upload className="mr-2 h-4 w-4" />
             CSV Import
@@ -1120,6 +1127,21 @@ export default function ITInventoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Label Generator ── */}
+      <AssetLabelGenerator
+        open={showLabels}
+        onOpenChange={setShowLabels}
+        title="IT Asset Labels"
+        items={assets.map((a): AssetLabelItem => ({
+          id: a.id,
+          asset_id: a.asset_id,
+          name: `${a.brand} ${a.model}`,
+          subtitle: a.serial_number || undefined,
+          detail: [a.assigned_to_name, a.location].filter(Boolean).join(" · ") || undefined,
+          tag: a.asset_type,
+        }))}
+      />
     </div>
   );
 }

@@ -96,6 +96,33 @@ export default function StoreTabLayout() {
         name="image-search"
         options={{ href: null }}
       />
+      <Tabs.Screen
+        name="purchase-orders"
+        options={{
+          title: "Orders",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="document-text-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="stock-take"
+        options={{
+          title: "Stock Take",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="clipboard-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="transfer"
+        options={{
+          title: "Transfer",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="swap-horizontal-outline" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

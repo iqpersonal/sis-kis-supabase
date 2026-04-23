@@ -58,7 +58,8 @@
           "photosPermission": "Allow KiS SiS to access photos for product images"
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "router": {},

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/context/language-context";
 import { useAcademicYear } from "@/context/academic-year-context";
+import { useSchoolFilter } from "@/context/school-filter-context";
 import ReportsTab from "./ReportsTab";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -110,6 +111,8 @@ const formatSAR = (n: number) => `SAR ${n.toFixed(2)}`;
 export default function BookSalesPage() {
   const { t, isRTL } = useLanguage();
   const { years, selectedYear } = useAcademicYear();
+  const { schoolFilter } = useSchoolFilter();
+  const schoolLabel = schoolFilter === "0021-01" ? "Boys" : schoolFilter === "0021-02" ? "Girls" : "";
 
   const [tab, setTab] = useState<"pos" | "history" | "catalog" | "reports">("pos");
   const [loading, setLoading] = useState(false);
@@ -199,12 +202,13 @@ export default function BookSalesPage() {
     try {
       const params = new URLSearchParams();
       if (selectedYear) params.set("year", selectedYear);
+      if (schoolLabel) params.set("school", schoolLabel);
       if (historyStatus) params.set("status", historyStatus);
       if (historyGrade) params.set("grade", historyGrade);
 
       const [salesRes, statsRes] = await Promise.all([
         fetch(`/api/book-sales/transactions?action=list&${params}`),
-        fetch(`/api/book-sales/transactions?action=stats&year=${selectedYear || ""}`),
+        fetch(`/api/book-sales/transactions?action=stats&year=${selectedYear || ""}${schoolLabel ? `&school=${encodeURIComponent(schoolLabel)}` : ""}`),
       ]);
       if (!salesRes.ok) throw new Error(`Sales API: ${salesRes.status}`);
       if (!statsRes.ok) throw new Error(`Stats API: ${statsRes.status}`);
@@ -215,7 +219,7 @@ export default function BookSalesPage() {
     } catch (err) {
       console.error("Failed to load sales:", err);
     }
-  }, [selectedYear, historyStatus, historyGrade]);
+  }, [selectedYear, historyStatus, historyGrade, schoolLabel]);
 
   useEffect(() => {
     setLoading(true);
@@ -234,6 +238,14 @@ export default function BookSalesPage() {
       } catch { /* ignore */ }
     })();
   }, [selectedYear]);
+
+  useEffect(() => {
+    if (schoolLabel) {
+      setFilterMajor(schoolLabel);
+      setFilterClass("");
+      setFilterSection("");
+    }
+  }, [schoolLabel]);
 
   // Derived cascading options
   const availableClasses = useMemo(() => {

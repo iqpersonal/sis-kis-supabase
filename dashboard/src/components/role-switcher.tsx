@@ -78,7 +78,9 @@ export function RoleSwitcher({
   }, []);
 
   const effectivePrimaryRole = primaryRole !== "viewer" ? primaryRole : cachedPrimaryRole ?? primaryRole;
-  const effectiveSecondaryRoles = secondaryRoles.length ? secondaryRoles : cachedSecondaryRoles;
+  // Only use the teacher_session cache when the user is a "viewer" (i.e. logged in via teacher portal).
+  // For real admin roles (super_admin, etc.) with no secondary roles, show nothing — don't bleed in cached data.
+  const effectiveSecondaryRoles = secondaryRoles.length ? secondaryRoles : (primaryRole === "viewer" ? cachedSecondaryRoles : []);
 
   // Read stored active portal on mount
   useEffect(() => {

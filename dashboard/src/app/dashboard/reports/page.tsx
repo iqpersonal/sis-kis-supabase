@@ -22,7 +22,9 @@ import { Search, Filter, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/language-context";
 import { getDb } from "@/lib/firebase";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
+import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { exportToCSV } from "@/lib/export-csv";
 
 type DocRecord = Record<string, unknown> & { id: string };
 type StatusFilter = "all" | "active" | "withdrawn";
@@ -45,23 +47,26 @@ export default function StudentsPage() {
     { classCode: string; sectionCode: string; sectionName: string }[]
   >([]);
 
-  // Load sections when school filter changes
+  // Load sections when school/year filter changes
   useEffect(() => {
     const school = schoolFilter === "all" ? "" : schoolFilter;
-    if (!school) {
-      setClassSections([]);
-      setClassFilter("all");
-      setSectionFilter("all");
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", selectedYear || "25-26"),
-          where("Major_Code", "==", school)
-        );
+        let q;
+        if (school) {
+          q = query(
+            collection(getDb(), "sections"),
+            where("Academic_Year", "==", selectedYear || "25-26"),
+            where("Major_Code", "==", school)
+          );
+        } else {
+          q = query(
+            collection(getDb(), "sections"),
+            where("Academic_Year", "==", selectedYear || "25-26"),
+            limit(2000)
+          );
+        }
         const snap = await getDocs(q);
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
@@ -224,17 +229,17 @@ export default function StudentsPage() {
       const q = search.toLowerCase();
       result = result.filter((s) => {
         const stu = s._student as DocRecord | null;
-        const name = String(stu?.E_Full_Name || stu?.E_Child_Name || "").toLowerCase();
+        const name = String(stu?.E_Student_Name || stu?.E_Full_Name || stu?.E_Child_Name || "").toLowerCase();
         const num = String(s.Student_Number || "").toLowerCase();
-        const natCode = String(stu?.Nationality_Code_Primary || "");
+        const natCode = String(stu?.Nationality_Code || stu?.Nationality_Code_Primary || "");
         const natName = (nationalityMap.get(natCode) || "").toLowerCase();
         return name.includes(q) || num.includes(q) || natName.includes(q);
       });
     }
     result.sort((a, b) => {
-      const nameA = String((a._student as DocRecord | null)?.E_Full_Name || (a._student as DocRecord | null)?.E_Child_Name || "");
-      const nameB = String((b._student as DocRecord | null)?.E_Full_Name || (b._student as DocRecord | null)?.E_Child_Name || "");
-      return nameA.localeCompare(nameB);
+      const nameA = String((a._student as DocRecord | null)?.E_Student_Name || (a._student as DocRecord | null)?.E_Full_Name || (a._student as DocRecord | null)?.E_Child_Name || "");
+      const nameB = String((b._student as DocRecord | null)?.E_Student_Name || (b._student as DocRecord | null)?.E_Full_Name || (b._student as DocRecord | null)?.E_Child_Name || "");
+      return compareAlphabeticalNames(nameA, nameB);
     });
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -282,7 +287,6 @@ export default function StudentsPage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              const { exportToCSV } = require("@/lib/export-csv");
               exportToCSV(
                 `students-${selectedYear}`,
                 ["Student #", "Name", "Gender", "Birth Date", "Nationality", "Status"],
@@ -290,10 +294,10 @@ export default function StudentsPage() {
                   const stu = s._student as DocRecord | null;
                   return [
                     String(s.Student_Number || ""),
-                    String(stu?.E_Full_Name || stu?.E_Child_Name || "-"),
+                    String(stu?.E_Student_Name || stu?.E_Full_Name || stu?.E_Child_Name || "-"),
                     stu?.Gender === true ? "Male" : stu?.Gender === false ? "Female" : "-",
-                    stu?.Child_Birth_Date ? String(stu.Child_Birth_Date).split("T")[0] : "-",
-                    stu?.Nationality_Code_Primary ? nationalityMap.get(String(stu.Nationality_Code_Primary)) || String(stu.Nationality_Code_Primary) : "-",
+                    (stu?.Birth_Date || stu?.Child_Birth_Date) ? String(stu?.Birth_Date || stu?.Child_Birth_Date).split("T")[0] : "-",
+                    (stu?.Nationality_Code || stu?.Nationality_Code_Primary) ? nationalityMap.get(String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)) || String(stu?.Nationality_Code || stu?.Nationality_Code_Primary) : "-",
                     s.Termination_Date ? "Withdrawn" : "Active",
                   ];
                 }),
@@ -335,8 +339,8 @@ export default function StudentsPage() {
             <option value="withdrawn">{t("withdrawnOnly")}</option>
           </select>
 
-          {/* Class filter — visible when a school is selected */}
-          {schoolFilter !== "all" && uniqueClasses.length > 0 && (
+          {/* Class filter */}
+          {uniqueClasses.length > 0 && (
             <select
               value={classFilter}
               onChange={(e) => setClassFilter(e.target.value)}
@@ -413,7 +417,7 @@ export default function StudentsPage() {
                 <TableCell className="font-medium">
                   {String(s.Student_Number || "")}
                 </TableCell>
-                <TableCell>{String(stu?.E_Full_Name || stu?.E_Child_Name || "-")}</TableCell>
+                <TableCell>{String(stu?.E_Student_Name || stu?.E_Full_Name || stu?.E_Child_Name || "-")}</TableCell>
                 <TableCell>
                   {stu?.Gender === true
                     ? "Male"
@@ -422,13 +426,13 @@ export default function StudentsPage() {
                       : "-"}
                 </TableCell>
                 <TableCell>
-                  {stu?.Child_Birth_Date
-                    ? String(stu.Child_Birth_Date).split("T")[0]
+                  {(stu?.Birth_Date || stu?.Child_Birth_Date)
+                    ? String(stu?.Birth_Date || stu?.Child_Birth_Date).split("T")[0]
                     : "-"}
                 </TableCell>
                 <TableCell>
-                  {stu?.Nationality_Code_Primary
-                    ? nationalityMap.get(String(stu.Nationality_Code_Primary)) || String(stu.Nationality_Code_Primary)
+                  {(stu?.Nationality_Code || stu?.Nationality_Code_Primary)
+                    ? nationalityMap.get(String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)) || String(stu?.Nationality_Code || stu?.Nationality_Code_Primary)
                     : "-"}
                 </TableCell>
                 <TableCell>

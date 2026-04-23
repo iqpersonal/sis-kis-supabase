@@ -3,8 +3,20 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { colors, spacing, fontSize, radius, commonStyles } from "@/lib/theme";
+
+const API_BASE = "https://sis-kis.web.app/api";
+
+let _cachedToken: string | undefined;
+let _tokenExpiry = 0;
+async function getToken(): Promise<string> {
+  if (_cachedToken && Date.now() < _tokenExpiry) return _cachedToken;
+  const t = await auth.currentUser?.getIdToken();
+  _cachedToken = t ?? "";
+  _tokenExpiry = Date.now() + 50 * 60 * 1000;
+  return _cachedToken;
+}
 
 export default function StudentDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -12,9 +24,20 @@ export default function StudentDetail() {
   const [student, setStudent] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Grades from student_progress
+  interface SubjectGrade { subject: string; grade: number; }
+  interface GradesData { year: string; overall_avg: number; subjects: SubjectGrade[]; }
+  const [grades, setGrades] = useState<GradesData | null>(null);
+
+  // Attendance summary
+  interface AbsenceRecord { date: string; days: number; status: string; }
+  const [absences, setAbsences] = useState<AbsenceRecord[]>([]);
+  const [gradesLoading, setGradesLoading] = useState(true);
+  const [attendanceLoading, setAttendanceLoading] = useState(true);
+
   useEffect(() => {
     if (!id) return;
-    const fetch = async () => {
+    const fetchAll = async () => {
       try {
         const snap = await getDoc(doc(db, "students", id));
         if (snap.exists()) {
@@ -25,8 +48,56 @@ export default function StudentDetail() {
       } finally {
         setLoading(false);
       }
+
+      // Fetch grades from student_progress
+      try {
+        const progressSnap = await getDoc(doc(db, "student_progress", id));
+        if (progressSnap.exists()) {
+          const d = progressSnap.data();
+          const years = Object.keys(d.years || {}).sort();
+          const latestYear = years[years.length - 1];
+          if (latestYear) {
+            const yd = d.years[latestYear];
+            setGrades({
+              year: latestYear,
+              overall_avg: yd.overall_avg ?? null,
+              subjects: (yd.subjects || []).map((s: Record<string, unknown>) => ({
+                subject: s.subject as string,
+                grade: s.grade as number,
+              })),
+            });
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        setGradesLoading(false);
+      }
+
+      // Fetch attendance summary
+      try {
+        const token = await getToken();
+        const res = await fetch(`${API_BASE}/attendance?studentNumber=${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const records = data.absences || data.records || [];
+          setAbsences(
+            records.slice(0, 10).map((r: Record<string, unknown>) => ({
+              date: r.date || r.Absence_Date || "",
+              days: Number(r.days || r.No_of_Days || 1),
+              status: r.status || "absent",
+            }))
+          );
+        }
+      } catch {
+        // ignore
+      } finally {
+        setAttendanceLoading(false);
+      }
     };
-    fetch();
+    fetchAll();
   }, [id]);
 
   if (loading) {
@@ -96,6 +167,54 @@ export default function StudentDetail() {
           <Row label="Class" value={(student.CURRENTCLASS || "") as string} />
           <Row label="Section" value={(student.CURRENTSECTION || "") as string} />
         </View>
+
+        {/* Grades */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📊 Academic Performance</Text>
+          {gradesLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : !grades ? (
+            <Text style={styles.emptyNote}>No grade data available.</Text>
+          ) : (
+            <>
+              <View style={styles.gradeHeader}>
+                <Text style={styles.gradeYear}>Year 20{grades.year}</Text>
+                {grades.overall_avg != null && (
+                  <View style={[styles.avgBadge, { backgroundColor: grades.overall_avg >= 60 ? colors.success || "#22c55e" : colors.danger }]}>
+                    <Text style={styles.avgText}>{grades.overall_avg.toFixed(1)}%</Text>
+                  </View>
+                )}
+              </View>
+              {grades.subjects.map((s) => (
+                <View key={s.subject} style={styles.row}>
+                  <Text style={styles.rowLabel}>{s.subject}</Text>
+                  <Text style={[styles.rowValue, { color: s.grade < 60 ? colors.danger : colors.text }]}>
+                    {s.grade != null ? `${s.grade}%` : "—"}
+                  </Text>
+                </View>
+              ))}
+            </>
+          )}
+        </View>
+
+        {/* Attendance */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📅 Absence History</Text>
+          {attendanceLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : absences.length === 0 ? (
+            <Text style={styles.emptyNote}>No recorded absences.</Text>
+          ) : (
+            absences.map((a, i) => (
+              <View key={i} style={styles.row}>
+                <Text style={styles.rowLabel}>{a.date}</Text>
+                <Text style={[styles.rowValue, { color: colors.danger }]}>
+                  {a.days} day{a.days !== 1 ? "s" : ""}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -146,4 +265,9 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
   rowValue: { fontSize: fontSize.sm, color: colors.text, fontWeight: "500" },
+  emptyNote: { fontSize: fontSize.sm, color: colors.textMuted, fontStyle: "italic" },
+  gradeHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  gradeYear: { fontSize: fontSize.sm, fontWeight: "600", color: colors.textSecondary },
+  avgBadge: { borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+  avgText: { fontSize: fontSize.sm, fontWeight: "700", color: colors.white },
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import {
   Card,
@@ -55,8 +55,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Save,
+  Upload,
+  FileSpreadsheet,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import Image from "next/image";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useClassNames } from "@/hooks/use-classes";
 import { useAuth } from "@/context/auth-context";
@@ -89,6 +96,11 @@ interface Book {
   publisher: string;
   total_copies: number;
   available_copies: number;
+  cover_url?: string;
+  age_group?: string;
+  grade_level?: string;
+  pages?: number | null;
+  call_number?: string;
 }
 
 interface Borrowing {
@@ -179,6 +191,110 @@ export default function LibraryPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null);
 
+  // Book detail drawer
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+
+  // CSV import
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<Record<string, string>[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [importStatus, setImportStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [importResult, setImportResult] = useState<{ added: number; skipped: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Deduplicate
+  const [dedupStatus, setDedupStatus] = useState<"idle" | "checking" | "found" | "removing" | "done">("idle");
+  const [dedupInfo, setDedupInfo] = useState<{ duplicate_groups: number; total_extra_docs: number } | null>(null);
+
+  async function handleFindDuplicates() {
+    setDedupStatus("checking");
+    setDedupInfo(null);
+    try {
+      const res = await fetch("/api/library?action=find_duplicates");
+      const data = await res.json();
+      setDedupInfo({ duplicate_groups: data.duplicate_groups ?? 0, total_extra_docs: data.total_extra_docs ?? 0 });
+      setDedupStatus(data.duplicate_groups > 0 ? "found" : "done");
+    } catch {
+      setDedupStatus("idle");
+    }
+  }
+
+  async function handleRemoveDuplicates() {
+    setDedupStatus("removing");
+    try {
+      const res = await fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove_duplicates" }),
+      });
+      const data = await res.json();
+      setDedupInfo({ duplicate_groups: 0, total_extra_docs: 0 });
+      setDedupStatus("done");
+      await Promise.all([fetchStats(), fetchBooks()]);
+      alert(data.message ?? "Done");
+    } catch {
+      setDedupStatus("found");
+    }
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setImportResult(null);
+    setImportStatus("idle");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const firstLine = text.split(/\r?\n/)[0] ?? "";
+      const delimiter = firstLine.includes("\t") ? "\t" : ",";
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) { setImportRows([]); return; }
+      const headers = lines[0].split(delimiter).map((h) => h.trim().replace(/^"|"$/g, ""));
+      const rows = lines.slice(1).map((line) => {
+        const vals = line.split(delimiter).map((v) => v.trim().replace(/^"|"$/g, ""));
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => { obj[h] = vals[i] ?? ""; });
+        return obj;
+      }).filter((r) => Object.values(r).some((v) => v));
+      setImportRows(rows);
+    };
+    reader.readAsText(file, "UTF-8");
+  }
+
+  async function handleImport() {
+    if (importRows.length === 0) return;
+    setImportStatus("uploading");
+    try {
+      const res = await fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk_import_books", books: importRows }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setImportResult({ added: data.added, skipped: data.skipped, errors: data.errors ?? [] });
+        setImportStatus("done");
+        await Promise.all([fetchStats(), fetchBooks()]);
+      } else {
+        setImportResult({ added: 0, skipped: 0, errors: [data.error ?? "Unknown error"] });
+        setImportStatus("error");
+      }
+    } catch {
+      setImportResult({ added: 0, skipped: 0, errors: ["Network error — please try again"] });
+      setImportStatus("error");
+    }
+  }
+
+  function resetImport() {
+    setImportOpen(false);
+    setImportRows([]);
+    setImportFileName("");
+    setImportResult(null);
+    setImportStatus("idle");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -217,10 +333,12 @@ export default function LibraryPage() {
   }, []);
 
   useEffect(() => {
+    // Load stats + books first so the page renders fast, then borrowings in background
     setLoading(true);
-    Promise.all([fetchStats(), fetchBooks(), fetchBorrowings(), fetchSettings()]).finally(() =>
-      setLoading(false)
-    );
+    Promise.all([fetchStats(), fetchBooks(), fetchSettings()])
+      .finally(() => setLoading(false));
+    // Borrowings are heavier (markOverdue scan) — load after page is visible
+    fetchBorrowings();
   }, [fetchStats, fetchBooks, fetchBorrowings, fetchSettings]);
 
   const refreshAll = useCallback(async () => {
@@ -329,7 +447,46 @@ export default function LibraryPage() {
             Manage books, copies, and student borrowings
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          <Button variant="outline" onClick={() => { setImportOpen((o) => !o); if (importOpen) resetImport(); }}>
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Import CSV
+            {importOpen ? <ChevronUp className="ml-1 h-3 w-3" /> : <ChevronDown className="ml-1 h-3 w-3" />}
+          </Button>
+          {dedupStatus === "idle" && (
+            <Button variant="outline" onClick={handleFindDuplicates}>
+              <Search className="mr-2 h-4 w-4" />
+              Find Duplicates
+            </Button>
+          )}
+          {dedupStatus === "checking" && (
+            <Button variant="outline" disabled>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking…
+            </Button>
+          )}
+          {dedupStatus === "found" && dedupInfo && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-destructive font-medium">
+                {dedupInfo.total_extra_docs} duplicate{dedupInfo.total_extra_docs !== 1 ? "s" : ""} found ({dedupInfo.duplicate_groups} group{dedupInfo.duplicate_groups !== 1 ? "s" : ""})
+              </span>
+              <Button variant="destructive" size="sm" onClick={handleRemoveDuplicates}>
+                <Trash2 className="mr-2 h-3 w-3" />Remove All
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setDedupStatus("idle")}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {dedupStatus === "removing" && (
+            <Button variant="outline" disabled>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />Removing…
+            </Button>
+          )}
+          {dedupStatus === "done" && (
+            <Button variant="ghost" size="sm" onClick={() => setDedupStatus("idle")}>
+              <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />No duplicates
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setAddBookOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Add Book
@@ -340,6 +497,89 @@ export default function LibraryPage() {
           </Button>
         </div>
       </div>
+
+      {/* ── CSV Import panel ── */}
+      {importOpen && (
+        <div className="rounded-xl border bg-card p-5 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-primary" />
+            <h2 className="font-semibold text-sm">Import Books from CSV / TSV</h2>
+            <span className="text-xs text-muted-foreground ml-1">— tab-separated or comma-separated, first row must be headers</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFileChange} className="hidden" id="lib-csv-file" />
+            <label htmlFor="lib-csv-file" className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-primary/60 bg-primary/5 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors">
+              <Upload className="h-4 w-4" />
+              Choose file
+            </label>
+            {importFileName && <span className="text-sm text-muted-foreground truncate max-w-[300px]">{importFileName}</span>}
+          </div>
+
+          {importRows.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{importRows.length}</span> rows detected — preview (first 5 rows):
+              </p>
+              <div className="overflow-x-auto rounded-md border text-xs">
+                <table className="w-full">
+                  <thead className="bg-muted">
+                    <tr>
+                      {Object.keys(importRows[0]).map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {importRows.slice(0, 5).map((row, ri) => (
+                      <tr key={ri} className="hover:bg-muted/40">
+                        {Object.values(row).map((val, vi) => (
+                          <td key={vi} className="px-3 py-1.5 whitespace-nowrap max-w-[180px] truncate">{val || "—"}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {importStatus !== "done" && (
+                <Button onClick={handleImport} disabled={importStatus === "uploading"}>
+                  {importStatus === "uploading" ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Uploading…</>
+                  ) : (
+                    <><Upload className="mr-2 h-4 w-4" />Upload {importRows.length} book{importRows.length !== 1 ? "s" : ""}</>
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {importResult && (
+            <div className={`rounded-md border px-4 py-3 text-sm space-y-1 ${
+              importStatus === "done" ? "border-green-500/40 bg-green-500/5" : "border-red-500/40 bg-red-500/5"
+            }`}>
+              <div className="flex items-center gap-2 font-medium">
+                {importStatus === "done"
+                  ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  : <XCircle className="h-4 w-4 text-red-600" />}
+                {importStatus === "done"
+                  ? `${importResult.added} book${importResult.added !== 1 ? "s" : ""} added${
+                      importResult.skipped > 0 ? `, ${importResult.skipped} skipped (duplicate ISBN)` : ""
+                    }`
+                  : "Import failed"}
+              </div>
+              {importResult.errors.length > 0 && (
+                <ul className="ml-6 list-disc text-xs text-muted-foreground space-y-0.5">
+                  {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              )}
+              {importStatus === "done" && (
+                <button onClick={resetImport} className="mt-1 text-xs text-primary hover:underline">Close</button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── KPI Cards ── */}
       {stats && (
@@ -419,7 +659,21 @@ export default function LibraryPage() {
         <OverviewTab borrowings={borrowings} onCheckin={handleCheckin} onRenew={handleRenew} onMarkLost={handleMarkLost} />
       )}
       {tab === "books" && (
-        <BooksTab books={filteredBooks} onDelete={setDeleteTarget} onEdit={setEditBook} />
+        <BooksTab books={filteredBooks} onDelete={setDeleteTarget} onEdit={setEditBook} onView={setSelectedBook} />
+      )}
+
+      {/* ── Book Detail Drawer ── */}
+      {selectedBook && (
+        <BookDetailDrawer
+          book={selectedBook}
+          allBorrowings={borrowings}
+          onClose={() => setSelectedBook(null)}
+          onEdit={(b) => { setEditBook(b); setSelectedBook(null); }}
+          onCoverFetched={(bookId, url) => {
+            setBooks((prev) => prev.map((b) => b.id === bookId ? { ...b, cover_url: url } : b));
+            setSelectedBook((prev) => prev && prev.id === bookId ? { ...prev, cover_url: url } : prev);
+          }}
+        />
       )}
       {tab === "borrowings" && (
         <BorrowingsTab
@@ -756,15 +1010,237 @@ function OverviewTab({
   );
 }
 
+/* ── BookCover ─────────────────────────────────────────────────── */
+function BookCover({
+  isbn,
+  coverUrl,
+  title,
+  size = "sm",
+}: {
+  isbn: string;
+  coverUrl?: string;
+  title: string;
+  size?: "sm" | "lg";
+}) {
+  const [src, setSrc] = useState<string | null>(
+    coverUrl && coverUrl !== ""
+      ? coverUrl
+      : isbn
+        ? `https://covers.openlibrary.org/b/isbn/${isbn}-${size === "lg" ? "L" : "M"}.jpg`
+        : null
+  );
+  const [failed, setFailed] = useState(false);
+
+  const w = size === "lg" ? 120 : 40;
+  const h = size === "lg" ? 168 : 56;
+
+  if (!src || failed) {
+    // Letter placeholder
+    const letter = title.trim()[0]?.toUpperCase() ?? "?";
+    const hue = (letter.charCodeAt(0) * 37) % 360;
+    return (
+      <div
+        style={{
+          width: w,
+          height: h,
+          background: `hsl(${hue} 55% 60%)`,
+          borderRadius: 4,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ color: "white", fontWeight: 700, fontSize: size === "lg" ? 36 : 16 }}>{letter}</span>
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={title}
+      width={w}
+      height={h}
+      style={{ objectFit: "cover", borderRadius: 4, flexShrink: 0, width: w, height: h }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/* ── BookDetailDrawer ──────────────────────────────────────────── */
+function BookDetailDrawer({
+  book,
+  allBorrowings,
+  onClose,
+  onEdit,
+  onCoverFetched,
+}: {
+  book: Book;
+  allBorrowings: Borrowing[];
+  onClose: () => void;
+  onEdit: (b: Book) => void;
+  onCoverFetched: (bookId: string, url: string) => void;
+}) {
+  const activeBorrowings = allBorrowings.filter(
+    (b) => b.book_id === book.id && (b.status === "borrowed" || b.status === "overdue")
+  );
+  const [fetchingCover, setFetchingCover] = useState(false);
+  const [coverMsg, setCoverMsg] = useState("");
+
+  async function handleFetchCover() {
+    setFetchingCover(true);
+    setCoverMsg("");
+    try {
+      const res = await fetch("/api/library/cover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookId: book.id, isbn: book.isbn, title: book.title, author: book.author }),
+      });
+      const data = await res.json();
+      if (data.cover_url) {
+        onCoverFetched(book.id, data.cover_url);
+        setCoverMsg("Cover updated!");
+      } else {
+        setCoverMsg(data.message || "No cover found.");
+      }
+    } catch {
+      setCoverMsg("Failed to fetch cover.");
+    }
+    setFetchingCover(false);
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto bg-background shadow-2xl border-l flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-background z-10">
+          <h2 className="font-bold text-lg truncate pr-4">Book Details</h2>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <XCircle className="h-5 w-5" />
+          </Button>
+        </div>
+
+        <div className="flex-1 px-6 py-5 space-y-6">
+          {/* Cover + title block */}
+          <div className="flex gap-4 items-start">
+            <BookCover isbn={book.isbn} coverUrl={book.cover_url} title={book.title} size="lg" />
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-base leading-tight">{book.title}</h3>
+              {book.title_ar && book.title_ar !== book.title && (
+                <p className="text-sm text-muted-foreground mt-0.5">{book.title_ar}</p>
+              )}
+              {book.author && <p className="text-sm mt-1 text-muted-foreground">by {book.author}</p>}
+              <div className="flex gap-1 mt-2 flex-wrap">
+                {book.category && <Badge variant="outline">{book.category}</Badge>}
+                {book.language && <Badge variant="secondary">{book.language}</Badge>}
+              </div>
+            </div>
+          </div>
+
+          {/* Fetch cover button */}
+          <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={handleFetchCover} disabled={fetchingCover}>
+              {fetchingCover
+                ? <><Loader2 className="mr-2 h-3 w-3 animate-spin" />Searching…</>
+                : <><RefreshCw className="mr-2 h-3 w-3" />Fetch Cover</>}
+            </Button>
+            {coverMsg && <span className="text-xs text-muted-foreground">{coverMsg}</span>}
+          </div>
+
+          {/* Details grid */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {[
+              ["ISBN", book.isbn],
+              ["Publisher", book.publisher],
+              ["Publication Year", book.publication_year?.toString()],
+              ["Pages", book.pages?.toString()],
+              ["Age Group", book.age_group],
+              ["Grade Level", book.grade_level],
+              ["Call Number", book.call_number],
+            ].filter(([, v]) => v).map(([label, value]) => (
+              <div key={label}>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="font-medium">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Availability */}
+          <div className="rounded-lg border p-4 space-y-1">
+            <p className="text-sm font-semibold mb-2">Availability</p>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Total copies</span>
+              <span className="font-medium">{book.total_copies}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Available</span>
+              <Badge variant={book.available_copies > 0 ? "secondary" : "destructive"}>
+                {book.available_copies}
+              </Badge>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Currently borrowed</span>
+              <span className="font-medium">{book.total_copies - book.available_copies}</span>
+            </div>
+          </div>
+
+          {/* Active borrowings */}
+          {activeBorrowings.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Currently Checked Out By</p>
+              <div className="divide-y rounded-lg border">
+                {activeBorrowings.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between px-3 py-2.5">
+                    <div>
+                      <p className="text-sm font-medium">{b.student_name}</p>
+                      <p className="text-xs text-muted-foreground">#{b.student_number}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant={b.status === "overdue" ? "destructive" : "default"}>{b.status}</Badge>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Due {new Date(b.due_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-6 py-4 border-t flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={() => onEdit(book)}>
+            <Pencil className="mr-2 h-4 w-4" /> Edit
+          </Button>
+          <Button variant="default" className="flex-1" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ── Books Tab (with pagination) ── */
 function BooksTab({
   books,
   onDelete,
   onEdit,
+  onView,
 }: {
   books: Book[];
   onDelete: (b: Book) => void;
   onEdit: (b: Book) => void;
+  onView: (b: Book) => void;
 }) {
   const [page, setPage] = useState(1);
   const paged = books.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -779,11 +1255,11 @@ function BooksTab({
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12"></TableHead>
               <TableHead>Title</TableHead>
               <TableHead>Author</TableHead>
               <TableHead>ISBN</TableHead>
               <TableHead>Category</TableHead>
-              <TableHead>Language</TableHead>
               <TableHead>Copies</TableHead>
               <TableHead>Available</TableHead>
               <TableHead></TableHead>
@@ -791,46 +1267,38 @@ function BooksTab({
           </TableHeader>
           <TableBody>
             {paged.map((b) => (
-              <TableRow key={b.id}>
+              <TableRow key={b.id} className="cursor-pointer hover:bg-muted/40" onClick={() => onView(b)}>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <BookCover isbn={b.isbn} coverUrl={b.cover_url} title={b.title} size="sm" />
+                </TableCell>
                 <TableCell>
-                  <span className="font-medium">{b.title}</span>
+                  <button
+                    className="font-medium text-left text-primary hover:underline"
+                    onClick={(e) => { e.stopPropagation(); onView(b); }}
+                  >
+                    {b.title}
+                  </button>
                   {b.title_ar && b.title_ar !== b.title && (
-                    <span className="block text-xs text-muted-foreground">
-                      {b.title_ar}
-                    </span>
+                    <span className="block text-xs text-muted-foreground">{b.title_ar}</span>
                   )}
                 </TableCell>
-                <TableCell>{b.author}</TableCell>
-                <TableCell className="text-xs font-mono">{b.isbn}</TableCell>
+                <TableCell>{b.author || "—"}</TableCell>
+                <TableCell className="text-xs font-mono">{b.isbn || "—"}</TableCell>
                 <TableCell>
                   <Badge variant="outline">{b.category || "—"}</Badge>
                 </TableCell>
-                <TableCell>{b.language}</TableCell>
                 <TableCell>{b.total_copies}</TableCell>
                 <TableCell>
-                  <Badge
-                    variant={b.available_copies > 0 ? "secondary" : "destructive"}
-                  >
+                  <Badge variant={b.available_copies > 0 ? "secondary" : "destructive"}>
                     {b.available_copies}
                   </Badge>
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <div className="flex gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => onEdit(b)}
-                      title="Edit book"
-                    >
+                    <Button size="icon" variant="ghost" onClick={() => onEdit(b)} title="Edit book">
                       <Pencil className="h-4 w-4" />
                     </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="text-red-500 hover:text-red-600"
-                      onClick={() => onDelete(b)}
-                      title="Delete book"
-                    >
+                    <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-600" onClick={() => onDelete(b)} title="Delete book">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1622,7 +2090,6 @@ function CheckoutDialog({
   books: Book[];
   onSuccess: () => void;
   selectedYear: string | null;
-  assignedMajor: string | null;
   assignedMajor: string | null;
 }) {
   const [studentQuery, setStudentQuery] = useState("");

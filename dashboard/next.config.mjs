@@ -9,6 +9,13 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "covers.openlibrary.org" },
+      { protocol: "http",  hostname: "books.google.com" },
+      { protocol: "https", hostname: "books.google.com" },
+    ],
+  },
 };
 
 export default nextConfig;

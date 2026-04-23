@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { CACHE_SHORT } from "@/lib/cache-headers";
 import { verifyAdmin } from "@/lib/api-auth";
+import { getCached, setCache } from "@/lib/cache";
 /**
  * GET /api/document-expiry
  * Lists students with document status (passport, iqama) and expiry dates.
@@ -21,29 +22,34 @@ export async function GET(req: NextRequest) {
   const schoolParam = req.nextUrl.searchParams.get("school");
 
   try {
-    // Step 1: Query registrations (already indexed by year/school — fast)
-    let regQuery: FirebaseFirestore.Query = adminDb
-      .collection("registrations")
-      .where("School_Year", "==", yearParam);
+    // Step 1: Query registrations — cached per year+school for 10 minutes
+    const regCacheKey = `doc-expiry-regs:${yearParam}:${schoolParam || "all"}`;
+    let regMap = getCached<Map<string, { class_name: string }>>(regCacheKey);
 
-    if (schoolParam) {
-      regQuery = regQuery.where("School_Code", "==", schoolParam);
-    }
+    if (!regMap) {
+      let regQuery: FirebaseFirestore.Query = adminDb
+        .collection("registrations")
+        .where("School_Year", "==", yearParam);
 
-    const regSnap = await regQuery.select(
-      "Student_Number",
-      "E_Class_Desc",
-      "School_Code"
-    ).limit(50000).get();
-
-    // Build map: student_number → class_name (deduplicated)
-    const regMap = new Map<string, { class_name: string }>();
-    for (const doc of regSnap.docs) {
-      const d = doc.data();
-      const sn = String(d.Student_Number || "");
-      if (sn && !regMap.has(sn)) {
-        regMap.set(sn, { class_name: d.E_Class_Desc || "" });
+      if (schoolParam) {
+        regQuery = regQuery.where("School_Code", "==", schoolParam);
       }
+
+      const regSnap = await regQuery.select(
+        "Student_Number",
+        "E_Class_Desc",
+        "School_Code"
+      ).limit(50000).get();
+
+      regMap = new Map<string, { class_name: string }>();
+      for (const doc of regSnap.docs) {
+        const d = doc.data();
+        const sn = String(d.Student_Number || "");
+        if (sn && !regMap.has(sn)) {
+          regMap.set(sn, { class_name: d.E_Class_Desc || "" });
+        }
+      }
+      setCache(regCacheKey, regMap);
     }
 
     const studentNumbers = Array.from(regMap.keys());

@@ -140,8 +140,8 @@ export default function ImageSearchScreen() {
   const [results, setResults] = useState<MatchResult[]>([]);
   const [searched, setSearched] = useState(false);
 
-  const { role } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles } = useAuth();
+  const access = getStoreAccess(roles);
   const router = useRouter();
 
   const searchWithImage = useCallback(async (uri: string) => {

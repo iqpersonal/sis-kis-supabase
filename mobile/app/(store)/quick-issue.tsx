@@ -18,8 +18,8 @@ import { colors, spacing, fontSize, radius, commonStyles } from "@/lib/theme";
 export default function QuickIssueScreen() {
   const params = useLocalSearchParams<{ store?: string; scannedItemId?: string }>();
   const router = useRouter();
-  const { role, user } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles, user } = useAuth();
+  const access = getStoreAccess(roles);
 
   const storeType = (params.store || (access.general ? "general" : "it")) as "general" | "it";
   const config: StoreConfig = STORE_CONFIGS[storeType];

@@ -34,8 +34,10 @@ export async function GET(req: NextRequest) {
     // ── Stats ──
     if (action === "stats") {
       const year = req.nextUrl.searchParams.get("year") || "";
+      const school = req.nextUrl.searchParams.get("school") || "";
       let query: FirebaseFirestore.Query = adminDb.collection(COLLECTION);
       if (year) query = query.where("year", "==", year);
+      if (school) query = query.where("school", "==", school);
 
       const snap = await query.select(
         "status", "total_amount", "paid_amount", "grade", "school", "created_at"

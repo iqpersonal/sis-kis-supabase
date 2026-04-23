@@ -67,13 +67,6 @@
         { "fieldPath": "store_type", "order": "ASCENDING" },
         { "fieldPath": "issued_at", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "delivery_notes",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "dn_number", "order": "DESCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []

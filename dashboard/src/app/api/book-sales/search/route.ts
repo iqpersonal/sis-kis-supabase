@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { getCached, setCache, invalidateCache } from "@/lib/cache";
 import { CACHE_SHORT } from "@/lib/cache-headers";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 /**
  * Book Sales — Student Search API (uses pre-built Firestore indexes for speed)
@@ -395,7 +396,7 @@ export async function GET(req: NextRequest) {
         }
       }
       const total = results.length;
-      results.sort((a, b) => a.student_name.localeCompare(b.student_name));
+      results.sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
       return NextResponse.json({ results: results.slice(0, 50), total }, { headers: CACHE_SHORT });
     }
 

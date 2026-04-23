@@ -15,6 +15,8 @@ import {
   Check,
   ClipboardEdit,
   FileDown,
+  Hash,
+  RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,16 @@ import { getDb } from "@/lib/firebase";
 import { useClassNames } from "@/hooks/use-classes";
 
 /* ─── Types ─── */
+interface GupshupTemplate {
+  id: string;
+  elementName: string;
+  languageCode: string;
+  category: string;
+  status: string;
+  data: string;
+  paramCount: number;
+}
+
 interface WhatsAppMessage {
   id: string;
   mode: string;
@@ -50,7 +62,7 @@ interface WhatsAppMessage {
   created_at: Date | null;
 }
 
-type Audience = "all" | "school" | "class" | "family";
+type Audience = "all" | "school" | "class" | "family" | "manual";
 type Mode = "template" | "text";
 type Recipient = "father" | "mother" | "both";
 
@@ -65,6 +77,7 @@ const AUDIENCES: { value: Audience; label: string; icon: React.ElementType }[] =
   { value: "school", label: "By School", icon: School },
   { value: "class", label: "By Class", icon: BookOpen },
   { value: "family", label: "Specific Family", icon: User },
+  { value: "manual", label: "Custom Numbers", icon: Hash },
 ];
 
 const EXCLUDED_CLASS_CODES = new Set(["34", "51"]);
@@ -94,6 +107,19 @@ export default function WhatsAppPage() {
     configured?: boolean;
     errors?: { phone: string; error: string }[];
   } | null>(null);
+
+  // Template list from Gupshup
+  const [templates, setTemplates] = useState<GupshupTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<GupshupTemplate | null>(null);
+
+  // Manual numbers (custom audience)
+  const [manualNumbers, setManualNumbers] = useState("");
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [sheetLoading, setSheetLoading] = useState(false);
 
   // Dynamic class/section data
   const [classSections, setClassSections] = useState<
@@ -135,6 +161,58 @@ export default function WhatsAppPage() {
       .then((d) => setApiConfigured(d.configured ?? false))
       .catch(() => setApiConfigured(false));
   }, []);
+
+  /* ─── Fetch template list ─── */
+  const fetchTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    try {
+      const r = await fetch("/api/whatsapp/templates");
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Failed");
+      setTemplates(data.templates || []);
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Failed to load templates");
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  /* ─── Parse manual numbers ─── */
+  const parsedNumbers = manualNumbers
+    .split(/[\n,;]+/)
+    .map((s) => s.replace(/\D/g, "").trim())
+    .filter((s) => s.length >= 9);
+
+  /* ─── Import numbers from Google Sheet CSV ─── */
+  const importFromSheet = async () => {
+    const url = sheetUrl.trim();
+    if (!url) return;
+    setSheetLoading(true);
+    try {
+      // Convert share URL to CSV export URL
+      let csvUrl = url;
+      const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      const gidMatch = url.match(/[?&]gid=(\d+)/);
+      if (match) {
+        csvUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv${gidMatch ? `&gid=${gidMatch[1]}` : ""}`;
+      }
+      const res = await fetch(`/api/whatsapp/sheet-import?url=${encodeURIComponent(csvUrl)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      const phones: string[] = data.phones || [];
+      setManualNumbers((prev) => {
+        const existing = prev.trim();
+        return existing ? `${existing}\n${phones.join("\n")}` : phones.join("\n");
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to import from sheet");
+    } finally {
+      setSheetLoading(false);
+    }
+  };
 
   /* ─── Load sections when school changes ─── */
   useEffect(() => {
@@ -299,6 +377,7 @@ export default function WhatsAppPage() {
       audienceFilter.targets = targets;
     }
     if (audience === "family") audienceFilter.family_number = familyNumber;
+    if (audience === "manual") audienceFilter.phones = parsedNumbers;
     audienceFilter.recipient = recipient;
 
     // Build template components (body params)
@@ -325,6 +404,7 @@ export default function WhatsAppPage() {
           audience_filter: audienceFilter,
           sender: user?.email || "Admin",
           templateName: mode === "template" ? templateName.trim() : undefined,
+          templateId: mode === "template" ? selectedTemplate?.id : undefined,
           languageCode: mode === "template" ? languageCode : undefined,
           components,
           text: mode === "text" ? text.trim() : undefined,
@@ -341,12 +421,16 @@ export default function WhatsAppPage() {
           configured: result.configured ?? true,
         });
         setTemplateName("");
+        setSelectedTemplate(null);
+        setTemplateSearch("");
         setTemplateParams("");
         setText("");
         setAudience("all");
         setSchool("");
         setSelectedTargets([]);
         setFamilyNumber("");
+        setManualNumbers("");
+        setSheetUrl("");
         setRecipient("father");
         loadHistory();
       } else {
@@ -383,6 +467,8 @@ export default function WhatsAppPage() {
       }
       case "family":
         return `Family #${f.family_number}`;
+      case "manual":
+        return `Custom (${msg.total_recipients} numbers)`;
       default:
         return msg.audience;
     }
@@ -394,7 +480,8 @@ export default function WhatsAppPage() {
     (mode === "template" ? templateName.trim() : text.trim()) &&
     (audience !== "class" || selectedTargets.length > 0) &&
     (audience !== "school" || school) &&
-    (audience !== "family" || familyNumber.trim());
+    (audience !== "family" || familyNumber.trim()) &&
+    (audience !== "manual" || parsedNumbers.length > 0);
 
   /* ─── Contact Update: Family lookup ─── */
   useEffect(() => {
@@ -541,44 +628,109 @@ export default function WhatsAppPage() {
           {/* Template mode fields */}
           {mode === "template" && (
             <div className="space-y-3">
+              {/* Template picker */}
               <div>
-                <label className="text-sm font-medium mb-1 block">Template Name</label>
-                <Input
-                  placeholder="e.g. fee_reminder, absence_alert, grade_notification"
-                  value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Use the exact template name as approved in your Gupshup/Meta Business account.
-                </p>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium">Template</label>
+                  <button
+                    onClick={fetchTemplates}
+                    disabled={templatesLoading}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${templatesLoading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </button>
+                </div>
+
+                {templatesError && (
+                  <p className="text-xs text-red-500 mb-1">{templatesError}</p>
+                )}
+
+                {/* Selected template display */}
+                {selectedTemplate ? (
+                  <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold font-mono">{selectedTemplate.elementName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{selectedTemplate.languageCode} · {selectedTemplate.category}</span>
+                        {selectedTemplate.paramCount > 0 && (
+                          <span className="rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs px-2 py-0.5">
+                            {selectedTemplate.paramCount} param{selectedTemplate.paramCount > 1 ? "s" : ""}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => { setSelectedTemplate(null); setTemplateName(""); setLanguageCode("ar"); }}
+                          className="text-xs text-muted-foreground hover:text-red-500"
+                        >✕ Change</button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">{selectedTemplate.data}</p>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      placeholder={templatesLoading ? "Loading templates…" : "Search or type template name…"}
+                      value={templateSearch}
+                      onChange={(e) => { setTemplateSearch(e.target.value); setTemplateName(e.target.value); setShowTemplatePicker(true); }}
+                      onFocus={() => setShowTemplatePicker(true)}
+                    />
+                    {showTemplatePicker && templates.length > 0 && (
+                      <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg max-h-72 overflow-y-auto">
+                        {templates
+                          .filter((t) => !templateSearch || t.elementName.toLowerCase().includes(templateSearch.toLowerCase()) || t.data.toLowerCase().includes(templateSearch.toLowerCase()))
+                          .map((t) => (
+                            <button
+                              key={t.id}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setSelectedTemplate(t);
+                                setTemplateName(t.elementName);
+                                setLanguageCode(t.languageCode || "ar");
+                                setTemplateSearch("");
+                                setShowTemplatePicker(false);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-muted transition-colors border-b last:border-0"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-mono font-medium">{t.elementName}</span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="text-xs text-muted-foreground">{t.languageCode}</span>
+                                  {t.paramCount > 0 && (
+                                    <span className="rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs px-1.5 py-0.5">
+                                      {t.paramCount}p
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{t.data}</p>
+                            </button>
+                          ))}
+                        {templates.filter((t) => !templateSearch || t.elementName.toLowerCase().includes(templateSearch.toLowerCase()) || t.data.toLowerCase().includes(templateSearch.toLowerCase())).length === 0 && (
+                          <p className="text-sm text-muted-foreground p-3">No templates match &quot;{templateSearch}&quot;</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="text-sm font-medium mb-1 block">Language</label>
-                <select
-                  value={languageCode}
-                  onChange={(e) => setLanguageCode(e.target.value)}
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
-                >
-                  <option value="ar">Arabic (ar)</option>
-                  <option value="en">English (en)</option>
-                  <option value="en_US">English US (en_US)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium mb-1 block">
-                  Template Parameters <span className="text-muted-foreground">(optional)</span>
-                </label>
-                <Input
-                  placeholder="param1, param2, param3 (comma-separated values for {{1}}, {{2}}, ...)"
-                  value={templateParams}
-                  onChange={(e) => setTemplateParams(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  These fill the {`{{1}}, {{2}}`}, … placeholders in your template body.
-                </p>
-              </div>
+              {/* Template params — only shown if template has params */}
+              {(selectedTemplate?.paramCount ?? 0) > 0 && (
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    Template Parameters
+                    <span className="text-muted-foreground ml-1">(comma-separated, {selectedTemplate!.paramCount} required)</span>
+                  </label>
+                  <Input
+                    placeholder={Array.from({ length: selectedTemplate!.paramCount }, (_, i) => `param${i + 1}`).join(", ")}
+                    value={templateParams}
+                    onChange={(e) => setTemplateParams(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    These fill the {`{{1}}, {{2}}`}, … placeholders in the template body.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -754,25 +906,74 @@ export default function WhatsAppPage() {
             </div>
           )}
 
-          {/* Recipient selector */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">Recipient Phone</label>
-            <div className="flex gap-2">
-              {RECIPIENTS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  onClick={() => setRecipient(value)}
-                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                    recipient === value
-                      ? "border-green-600 bg-green-600/10 text-green-700"
-                      : "border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+          {/* Custom / Manual numbers */}
+          {audience === "manual" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Phone Numbers</label>
+                <textarea
+                  className="w-full min-h-[140px] rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                  placeholder={`Paste numbers, one per line or comma-separated:\n966501234567\n966559876543\n+966 55 111 2222`}
+                  value={manualNumbers}
+                  onChange={(e) => setManualNumbers(e.target.value)}
+                />
+                {parsedNumbers.length > 0 && (
+                  <p className="text-xs text-green-600 mt-1">
+                    ✓ {parsedNumbers.length} valid number{parsedNumbers.length !== 1 ? "s" : ""} detected
+                  </p>
+                )}
+              </div>
+
+              {/* Google Sheets import */}
+              <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+                <p className="text-xs font-medium">Import from Google Sheet</p>
+                <p className="text-xs text-muted-foreground">
+                  Share the sheet with &quot;Anyone with the link&quot; (view only), then paste the URL below.
+                  Any column containing phone numbers will be imported automatically.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://docs.google.com/spreadsheets/d/…"
+                    value={sheetUrl}
+                    onChange={(e) => setSheetUrl(e.target.value)}
+                    className="text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={importFromSheet}
+                    disabled={sheetLoading || !sheetUrl.trim()}
+                    className="shrink-0 gap-1"
+                  >
+                    {sheetLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />}
+                    Import
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Recipient selector — hidden for manual audience (numbers are already explicit) */}
+          {audience !== "manual" && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">Recipient Phone</label>
+              <div className="flex gap-2">
+                {RECIPIENTS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => setRecipient(value)}
+                    className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                      recipient === value
+                        ? "border-green-600 bg-green-600/10 text-green-700"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <Separator />
 

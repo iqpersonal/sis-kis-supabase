@@ -40,6 +40,7 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import { useAcademicYear } from "@/context/academic-year-context";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 import { useSchoolFilter } from "@/context/school-filter-context";
 import {
   useQuizSummary,
@@ -181,7 +182,7 @@ export default function AdminProgressReportPage() {
       }
       map.get(r.student_number)!.subjects.push(r);
     }
-    return [...map.values()].sort((a, b) => a.student_name.localeCompare(b.student_name));
+    return [...map.values()].sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
   }, [reports]);
 
   /* ── All subjects that appear ── */

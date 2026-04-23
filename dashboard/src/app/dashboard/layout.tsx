@@ -213,6 +213,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/dashboard/audit-log", labelKey: "navAuditLog" as TranslationKeys, icon: Shield, permission: "admin.audit_log" as Permission },
       { href: "/dashboard/staff", labelKey: "navStaffDirectory" as TranslationKeys, icon: Contact, permission: "staff.view" as Permission },
       { href: "/dashboard/it-inventory", labelKey: "navITInventory" as TranslationKeys, icon: Laptop, permission: "inventory.view" as Permission },
+      { href: "/dashboard/fixed-assets", labelKey: "navFixedAssets" as TranslationKeys, icon: Package, permission: "fixed_assets.view" as Permission },
       { href: "/dashboard/store-proposal", labelKey: "navStoreProposal" as TranslationKeys, icon: FileText, permission: "admin.users" as Permission },
       { href: "/dashboard/app-features", labelKey: "navAppFeatures" as TranslationKeys, icon: Presentation, permission: "admin.audit_log" as Permission },
     ],
@@ -582,7 +583,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { user, role, signOut, can } = useAuth();
+  const { user, role, loading: authLoading, signOut, can } = useAuth();
   const { secondaryRoles } = useAuth();
   const [fallbackPrimaryRole, setFallbackPrimaryRole] = useState<Role | null>(null);
   const [fallbackSecondaryRoles, setFallbackSecondaryRoles] = useState<Role[]>([]);
@@ -618,21 +619,32 @@ export default function DashboardLayout({
   // Read active portal from localStorage (set by RoleSwitcher)
   useEffect(() => {
     const stored = localStorage.getItem(ACTIVE_PORTAL_KEY);
-    // Only apply scoping if the stored role is actually one of the user's secondary roles
-    if (stored && effectiveSecondaryRoles.includes(stored as Role)) {
+    // Only apply scoping if the stored role is actually one of the user's REAL secondary roles
+    // (do NOT use effectiveSecondaryRoles — it can be polluted by teacher_session cache)
+    if (stored && secondaryRoles.includes(stored as Role)) {
       setActivePortalRole(stored);
     } else {
       setActivePortalRole(null);
     }
-  }, [effectiveSecondaryRoles]);
+  }, [secondaryRoles]);
   const router = useRouter();
-  const { years, selectedYear, selectedLabel, setSelectedYear, loading: yearsLoading } =
+  const { years, selectedYear, selectedLabel, setSelectedYear, loading: yearsLoading, locked: yearLocked } =
     useAcademicYear();
   const { schoolFilter, setSchoolFilter, locked: schoolLocked } = useSchoolFilter();
   const { t, isRTL: rtl } = useLanguage();
+  const [mounted, setMounted] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [sidebarMini, setSidebarMini] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  // Redirect pure teachers — they should use the teacher portal, not the admin dashboard
+  useEffect(() => {
+    if (!authLoading && role === "teacher") {
+      router.replace("/teacher/dashboard");
+    }
+  }, [authLoading, role, router]);
 
   const toggleGroup = (label: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [label]: !prev[label] }));
@@ -649,8 +661,6 @@ export default function DashboardLayout({
       return can(permission);
     }),
   })).filter((group) => group.items.length > 0);
-
-  const yearLocked = effectivePrimaryRole === "teacher";
 
   const handleSignOut = async () => {
     await signOut();
@@ -684,17 +694,37 @@ export default function DashboardLayout({
     <div className={cn("flex min-h-screen", rtl && "flex-row-reverse")}>
       {/* ── Desktop Sidebar ──────────────────────────────────── */}
       <aside
+        suppressHydrationWarning
         className={cn(
           "sticky top-0 hidden h-screen shrink-0 transition-[width] duration-200 ease-in-out lg:flex lg:flex-col",
           sidebarMini ? "w-[64px]" : "w-[260px]",
           rtl ? "border-l border-sidebar-border" : "border-r border-sidebar-border"
         )}
       >
-        <SidebarContent
-          {...sidebarProps}
-          mini={sidebarMini}
-          onToggleMini={() => setSidebarMini((v) => !v)}
-        />
+        {mounted ? (
+          <SidebarContent
+            {...sidebarProps}
+            mini={sidebarMini}
+            onToggleMini={() => setSidebarMini((v) => !v)}
+          />
+        ) : (
+          <div className="flex h-full flex-col overflow-hidden bg-sidebar">
+            <div className="flex h-16 shrink-0 items-center gap-3 px-5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary/20">
+                <BarChart3 className="h-5 w-5 text-sidebar-primary" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <div className="h-3 w-24 rounded bg-sidebar-foreground/10" />
+                <div className="h-2 w-32 rounded bg-sidebar-foreground/5" />
+              </div>
+            </div>
+            <div className="flex-1 px-3 py-2 space-y-1">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-8 rounded-lg bg-sidebar-foreground/5" />
+              ))}
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* ── Main content ──────────────────────────────────────── */}

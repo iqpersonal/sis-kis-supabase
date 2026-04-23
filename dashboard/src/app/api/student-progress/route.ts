@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
 
     if (!indexDoc.exists) {
       // Fallback: use cached scan or read student_progress collection
-      let entries: { student_number: string; name: string; family: string }[];
+      let entries: { student_number: string; name: string; family: string; class?: string; section?: string }[];
 
       if (indexCache && Date.now() - indexCache.ts < INDEX_CACHE_TTL) {
         entries = indexCache.entries;
@@ -248,7 +248,7 @@ export async function POST(req: NextRequest) {
       }
 
       const lowerQ = q.toLowerCase();
-      const matched: { student_number: string; name: string; family: string }[] = [];
+      const matched: { student_number: string; name: string; family: string; class?: string; section?: string }[] = [];
 
       for (const e of entries) {
         if (matched.length >= maxResults) break;

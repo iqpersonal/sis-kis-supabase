@@ -6,8 +6,8 @@ import { colors, spacing, fontSize, radius, commonStyles } from "@/lib/theme";
 
 export default function StoreSettingsTab() {
   const router = useRouter();
-  const { user, role, signOut } = useAuth();
-  const access = getStoreAccess(role);
+  const { user, roles, signOut } = useAuth();
+  const access = getStoreAccess(roles);
 
   const storeLabel = access.general && access.it
     ? "General Store & IT Store"
@@ -47,7 +47,7 @@ export default function StoreSettingsTab() {
             </Text>
             <Text style={styles.profileEmail}>{user?.email}</Text>
             <View style={styles.roleBadge}>
-              <Text style={styles.roleText}>{(role || "admin").replace("_", " ")}</Text>
+              <Text style={styles.roleText}>{roles?.map(r => r.replace(/_/g, " ")).join(", ") || "user"}</Text>
             </View>
           </View>
         </View>

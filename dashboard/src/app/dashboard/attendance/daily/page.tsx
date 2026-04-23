@@ -35,6 +35,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useAcademicYear } from "@/context/academic-year-context";
+import { compareAlphabeticalNames } from "@/lib/name-sort";
 import { useSchoolFilter } from "@/context/school-filter-context";
 
 /* ------------------------------------------------------------------ */
@@ -258,7 +259,7 @@ export default function DailyAttendancePage() {
           s.student_number.includes(searchTerm)
       )
     : [...students]
-  ).sort((a, b) => a.student_name.localeCompare(b.student_name));
+  ).sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
 
   // Stats
   const getEffectiveStatus = (s: StudentAttendance): AttendanceStatus => {

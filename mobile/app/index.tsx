@@ -5,7 +5,7 @@ import { View, ActivityIndicator } from "react-native";
 import { colors } from "@/lib/theme";
 
 export default function Index() {
-  const { user, role, loading: authLoading } = useAuth();
+  const { user, roles, loading: authLoading } = useAuth();
   const { familyNumber, loading: parentLoading } = useParent();
 
   if (authLoading || parentLoading) {
@@ -19,13 +19,14 @@ export default function Index() {
   // If admin/teacher is signed in via Firebase Auth
   if (user) {
     // Staff-only users get the staff portal
-    if (isStaffOnlyRole(role)) {
+    if (isStaffOnlyRole(roles)) {
       return <Redirect href="/(staff)/home" />;
     }
     // Store-only roles get the focused store experience
-    if (isStoreRole(role)) {
+    if (isStoreRole(roles)) {
       return <Redirect href="/(store)" />;
     }
+    // Everyone else (teacher, admin, librarian, multi-role) gets the main tabs
     return <Redirect href="/(tabs)" />;
   }
 

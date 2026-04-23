@@ -1,13 +1,40 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useState, useEffect } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "expo-router";
+import { collection, query, where, getDocs, limit } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { colors, spacing, fontSize, radius, commonStyles } from "@/lib/theme";
+
+interface StaffProfile {
+  E_Full_Name: string;
+  Department_Desc: string;
+  Position_Desc: string;
+  Staff_Number: string;
+}
 
 export default function StaffSettings() {
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const [profile, setProfile] = useState<StaffProfile | null>(null);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    const fetch = async () => {
+      try {
+        const q = query(
+          collection(db, "staff"),
+          where("E_Mail", "==", user.email!.toLowerCase()),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) setProfile(snap.docs[0].data() as StaffProfile);
+      } catch { /* ignore */ }
+    };
+    fetch();
+  }, [user?.email]);
 
   const handleSignOut = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -33,14 +60,37 @@ export default function StaffSettings() {
           <View style={styles.avatarRow}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
-                {user?.email?.charAt(0).toUpperCase() || "?"}
+                {(profile?.E_Full_Name || user?.email || "?").charAt(0).toUpperCase()}
               </Text>
             </View>
             <View style={styles.userInfo}>
+              <Text style={styles.name}>{profile?.E_Full_Name || user?.displayName || user?.email || "Staff"}</Text>
               <Text style={styles.email}>{user?.email || "—"}</Text>
-              <Text style={styles.label}>Staff Account</Text>
+              {profile?.Position_Desc ? (
+                <Text style={styles.label}>{profile.Position_Desc}</Text>
+              ) : (
+                <Text style={styles.label}>Staff Account</Text>
+              )}
             </View>
           </View>
+          {profile && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.infoRow}>
+                <Ionicons name="business-outline" size={16} color={colors.textMuted} />
+                <Text style={styles.infoText}>{profile.Department_Desc || "—"}</Text>
+              </View>
+              {profile.Staff_Number ? (
+                <>
+                  <View style={styles.divider} />
+                  <View style={styles.infoRow}>
+                    <Ionicons name="card-outline" size={16} color={colors.textMuted} />
+                    <Text style={styles.infoText}>Staff # {profile.Staff_Number}</Text>
+                  </View>
+                </>
+              ) : null}
+            </>
+          )}
         </View>
 
         {/* Info items */}
@@ -109,10 +159,15 @@ const styles = StyleSheet.create({
   userInfo: {
     flex: 1,
   },
-  email: {
+  name: {
     fontSize: fontSize.base,
-    fontWeight: "600",
+    fontWeight: "700",
     color: colors.text,
+  },
+  email: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    marginTop: 1,
   },
   label: {
     fontSize: fontSize.xs,

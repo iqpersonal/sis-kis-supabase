@@ -3,28 +3,33 @@ import { Tabs, Redirect } from "expo-router";
 import { StyleSheet, BackHandler, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useAuth, isStoreRole } from "@/context/auth-context";
+import { useAuth, isStoreRole, hasLibraryAccess } from "@/context/auth-context";
 import { colors, fontSize } from "@/lib/theme";
 
 export default function TabLayout() {
-  // Prevent Android back button from navigating to login screen
+  const insets = useSafeAreaInsets();
+  const bottomPadding = Math.max(insets.bottom, 12);
+  const { user, roles } = useAuth();
+
+  // Prevent Android back button from exiting while authenticated
   useEffect(() => {
     if (Platform.OS !== "android") return;
     const handler = () => {
+      if (!user) return false; // let AuthGuard handle navigation
       BackHandler.exitApp();
       return true;
     };
     BackHandler.addEventListener("hardwareBackPress", handler);
     return () => BackHandler.removeEventListener("hardwareBackPress", handler);
-  }, []);
-  const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom, 12);
-  const { role } = useAuth();
+  }, [user]);
 
   // Store-only roles should never be in (tabs) — redirect to (store)
-  if (isStoreRole(role)) {
+  if (isStoreRole(roles)) {
     return <Redirect href="/(store)" />;
   }
+
+  const showLibrary = hasLibraryAccess(roles);
+  const showClasses = roles?.includes("teacher");
 
   return (
     <Tabs
@@ -62,11 +67,31 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="classes"
+        options={{
+          title: "Classes",
+          href: showClasses ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="easel-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="notifications"
         options={{
           title: "Alerts",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="library"
+        options={{
+          title: "Library",
+          href: showLibrary ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="book-outline" size={size} color={color} />
           ),
         }}
       />

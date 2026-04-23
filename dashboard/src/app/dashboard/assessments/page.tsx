@@ -433,7 +433,7 @@ export default function AssessmentsPage() {
           </CardHeader>
           <CardContent>
             <div style={{ width: "100%", height: Math.max(300, subjectData.length * 38) }}>
-              <ResponsiveContainer>
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <BarChart
                   data={subjectData}
                   layout="vertical"

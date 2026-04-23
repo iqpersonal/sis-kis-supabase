@@ -106,6 +106,9 @@ export const PERMISSIONS = [
   "admissions.reports",
   // Exam Seating
   "exam_seating.manage",
+  // Fixed Assets
+  "fixed_assets.view",
+  "fixed_assets.manage",
   // Admin
   "admin.users",
   "admin.audit_log",
@@ -134,6 +137,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "it_store.request",
     "store_reports.view",
     "tickets.manage",
+    "fixed_assets.view",
+    "fixed_assets.manage",
   ],
 
   // Academic Director: view-only, scoped to assigned major (school branch)
@@ -226,6 +231,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "general_store.view",
     "it_store.view",
     "inventory.view",
+    "fixed_assets.view",
   ],
 
   // Registrar: student registration, documents, transfers — no academics/analytics
@@ -303,6 +309,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "it_store.request",
     "store_reports.view",
     "tickets.manage",
+    "fixed_assets.view",
+    "fixed_assets.manage",
   ],
 
   admissions: [
@@ -354,6 +362,7 @@ export const ROUTE_PERMISSIONS: Record<string, Permission> = {
   "/dashboard/audit-log": "admin.audit_log",
   "/dashboard/staff": "staff.view",
   "/dashboard/it-inventory": "inventory.view",
+  "/dashboard/fixed-assets": "fixed_assets.view",
   "/dashboard/general-store": "general_store.view",
   "/dashboard/it-store": "it_store.view",
   "/dashboard/store-reports": "store_reports.view",

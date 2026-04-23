@@ -31,28 +31,33 @@ export async function GET(req: NextRequest) {
   const target = req.nextUrl.searchParams.get("target");
   const now = new Date().toISOString();
 
-  let query = adminDb
-    .collection("announcements")
-    .where("is_active", "==", true)
-    .orderBy("created_at", "desc")
-    .limit(50);
+  try {
+    const query = adminDb
+      .collection("announcements")
+      .where("is_active", "==", true)
+      .orderBy("created_at", "desc")
+      .limit(50);
 
-  // Fetch all active then filter client-side (Firestore doesn't support OR on different fields easily)
-  const snap = await query.get();
+    // Fetch all active then filter client-side (Firestore doesn't support OR on different fields easily)
+    const snap = await query.get();
 
-  const announcements = snap.docs
-    .map((doc) => ({ id: doc.id, ...doc.data() }))
-    .filter((a: Record<string, unknown>) => {
-      // Filter expired
-      if (a.expires_at && (a.expires_at as string) < now) return false;
-      // Filter by target if specified
-      if (target && target !== "all") {
-        return a.target === "all" || a.target === target;
-      }
-      return true;
-    });
+    const announcements = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((a: Record<string, unknown>) => {
+        // Filter expired
+        if (a.expires_at && (a.expires_at as string) < now) return false;
+        // Filter by target if specified
+        if (target && target !== "all") {
+          return a.target === "all" || a.target === target;
+        }
+        return true;
+      });
 
-  return NextResponse.json({ announcements });
+    return NextResponse.json({ announcements });
+  } catch (err) {
+    console.error("Announcements fetch error:", err);
+    return NextResponse.json({ announcements: [] });
+  }
 }
 
 export async function POST(req: NextRequest) {

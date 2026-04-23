@@ -23,8 +23,8 @@ export default function ScanScreen() {
   const lastScanTime = useRef(0);
   const consecutiveRef = useRef<{ value: string; count: number }>({ value: "", count: 0 });
   const { searchByBarcode, searching } = useBarcodeSearch();
-  const { role } = useAuth();
-  const access = getStoreAccess(role);
+  const { roles } = useAuth();
+  const access = getStoreAccess(roles);
   const router = useRouter();
   const params = useLocalSearchParams<{ mode?: string; store?: string }>();
   const isQuickIssue = params.mode === "quick-issue";
