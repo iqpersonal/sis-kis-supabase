@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { verifyAuth } from "@/lib/api-auth";
@@ -17,13 +17,13 @@ async function getRefTables() {
   if (_subjectMap && _quizDescMap && now - _refCacheTime < REF_CACHE_TTL) {
     return { subjectMap: _subjectMap, nameToCode: _nameToCode!, quizDescMap: _quizDescMap };
   }
-  const [subjectSnap, quizSnap] = await Promise.all([
-    adminDb.collection("raw_Subject").get(),
-    adminDb.collection("raw_tbl_Quiz").get(),
+  const supabase = createServiceClient();
+  const [{ data: subjectRows }, { data: quizRows }] = await Promise.all([
+    supabase.from("raw_Subject").select("*").limit(5000),
+    supabase.from("raw_tbl_Quiz").select("*").limit(5000),
   ]);
   const subjectMap: Record<string, string> = {};
-  subjectSnap.forEach((d) => {
-    const data = d.data();
+  (subjectRows || []).forEach((data: Record<string, unknown>) => {
     const code = String(data.Subject_Code ?? "").trim();
     const name = String(data.E_Subject_Name ?? code).trim();
     if (code) subjectMap[code] = name;
@@ -31,8 +31,7 @@ async function getRefTables() {
   const nameToCode: Record<string, string> = {};
   for (const [code, name] of Object.entries(subjectMap)) nameToCode[name] = code;
   const quizDescMap: Record<string, string> = {};
-  quizSnap.forEach((d) => {
-    const data = d.data();
+  (quizRows || []).forEach((data: Record<string, unknown>) => {
     const code = String(data.Quiz_Code ?? "").trim();
     const desc = String(data.E_Quiz_Desc ?? code).trim();
     if (code) quizDescMap[code] = desc;
@@ -245,14 +244,15 @@ function gradeSortValue(className: string): number {
 
 async function generateTeacherAssignmentPDF(year: string, school: string): Promise<ArrayBuffer> {
   const campusFilter = campusFilterFromSchool(school);
+  const supabase = createServiceClient();
 
-  const snap = await adminDb
-    .collection("admin_users")
-    .where("role", "==", "teacher")
-    .get();
+  const { data: teacherRows } = await supabase
+    .from("admin_users")
+    .select("*")
+    .eq("role", "teacher");
 
-  const teacherDocs = snap.docs
-    .map((d) => d.data() as TeacherAssignmentReportDoc)
+  const teacherDocs = (teacherRows || [])
+    .map((d) => d as TeacherAssignmentReportDoc)
     .map((doc) => {
       const name = (doc.displayName || "").trim() || (doc.email || "").trim() || "Unnamed Teacher";
       const assigned = Array.isArray(doc.assigned_classes) ? doc.assigned_classes : [];
@@ -862,16 +862,18 @@ async function generateClassReportPDF(
   classCode: string,
   school: string,
 ): Promise<ArrayBuffer> {
+  const supabase = createServiceClient();
   // Fetch browse index for the year
-  const indexSnap = await adminDb
-    .collection("parent_config")
-    .doc(`browse_${yearKey}`)
-    .get();
+  const { data: indexData } = await supabase
+    .from("parent_config")
+    .select("*")
+    .eq("id", `browse_${yearKey}`)
+    .maybeSingle();
 
-  if (!indexSnap.exists) throw new Error("No browse index for this year");
+  if (!indexData) throw new Error("No browse index for this year");
 
   // browse_{year} stores data in buckets keyed by "classCode__sectionCode__school"
-  const buckets = (indexSnap.data()?.buckets || {}) as Record<
+  const buckets = ((indexData as Record<string, unknown>).buckets || {}) as Record<
     string,
     { sn: string; name: string; avg?: number; class?: string; section?: string }[]
   >;
@@ -1010,20 +1012,28 @@ async function generateProgressReportPDF(
   year: string,
   month?: string,
 ): Promise<ArrayBuffer> {
+  const supabase = createServiceClient();
   // Fetch student info
-  const studentSnap = await adminDb.collection("student_progress").doc(studentNumber.trim()).get();
-  const studentData = studentSnap.exists ? studentSnap.data() : null;
-  const studentName = studentData?.student_name || studentNumber;
-  const yearData = studentData?.years?.[year] || {};
+  const { data: studentData } = await supabase
+    .from("student_progress")
+    .select("*")
+    .or(`id.eq.${studentNumber.trim()},student_number.eq.${studentNumber.trim()}`)
+    .maybeSingle();
+  const studentPayload = (studentData?.data as Record<string, unknown> | undefined) ?? (studentData as Record<string, unknown> | null);
+  const yearsMap = (studentPayload?.years as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const studentName = String((studentPayload?.student_name as string | undefined) || studentNumber);
+  const yearData = yearsMap[year] || {};
   const className = yearData.class_name || "";
   const sectionName = yearData.section_name || "";
 
   // Fetch progress reports
-  let q = adminDb.collection("progress_reports")
-    .where("student_number", "==", studentNumber)
-    .where("academic_year", "==", year);
-  if (month) q = q.where("month", "==", month);
-  const snap = await q.get();
+  let q = supabase
+    .from("progress_reports")
+    .select("*")
+    .eq("student_number", studentNumber)
+    .eq("academic_year", year);
+  if (month) q = q.eq("month", month);
+  const { data: progressRows } = await q;
 
   interface PREntry {
     subject: string;
@@ -1035,7 +1045,7 @@ async function generateProgressReportPDF(
     conduct: string;
     notes?: string;
   }
-  const entries: PREntry[] = snap.docs.map((d) => d.data() as PREntry);
+  const entries: PREntry[] = (progressRows ?? []) as PREntry[];
 
   // Group by month
   const MONTH_ORDER = [
@@ -1131,15 +1141,18 @@ async function generateSubjectPerformancePDF(
   sectionCode: string,
   school: string,
 ): Promise<ArrayBuffer> {
+  const supabase = createServiceClient();
   // 1. Load browse index to get student list
-  const indexSnap = await adminDb.collection("parent_config").doc(`browse_${yearKey}`).get();
-  if (!indexSnap.exists) throw new Error("No browse index for this year");
-
-  const indexData = indexSnap.data() as Record<string, unknown>;
+  const { data: indexData } = await supabase
+    .from("parent_config")
+    .select("*")
+    .eq("id", `browse_${yearKey}`)
+    .maybeSingle();
+  if (!indexData) throw new Error("No browse index for this year");
 
   // browse_{year} stores data in buckets keyed by "classCode__sectionCode__school"
   const browseStudents: { student_number: string; class_code: string; section_code: string; school: string }[] = [];
-  const buckets = (indexData.buckets || {}) as Record<string, { sn: string }[]>;
+  const buckets = ((indexData as Record<string, unknown>).buckets || {}) as Record<string, { sn: string }[]>;
   for (const [bucketKey, entries] of Object.entries(buckets)) {
     const parts = bucketKey.split("__");
     const bClass = parts[0] || "";
@@ -1155,15 +1168,20 @@ async function generateSubjectPerformancePDF(
 
   if (browseStudents.length === 0) throw new Error("No students found for the selected filters");
 
-  // 2. Batch-fetch student_progress docs (chunks of 100)
+  // 2. Batch-fetch student_progress rows (chunks of 100)
   const CHUNK = 100;
-  const allSnaps: FirebaseFirestore.DocumentSnapshot[] = [];
+  const allRows: Record<string, unknown>[] = [];
   for (let i = 0; i < browseStudents.length; i += CHUNK) {
-    const refs = browseStudents.slice(i, i + CHUNK).map((s) =>
-      adminDb.collection("student_progress").doc(s.student_number),
-    );
-    const batch = await adminDb.getAll(...refs);
-    allSnaps.push(...batch);
+    const sns = browseStudents.slice(i, i + CHUNK).map((s) => s.student_number);
+    const { data: rowsByStudent } = await supabase
+      .from("student_progress")
+      .select("*")
+      .in("student_number", sns);
+    const { data: rowsById } = await supabase
+      .from("student_progress")
+      .select("*")
+      .in("id", sns);
+    allRows.push(...(rowsByStudent || []), ...(rowsById || []));
   }
 
   // 3. Aggregate per subject per term
@@ -1177,10 +1195,10 @@ async function generateSubjectPerformancePDF(
   // subjectData: subject → termKey → {sum, count}
   const subjectData = new Map<string, Record<string, { sum: number; count: number }>>();
 
-  for (const snap of allSnaps) {
-    if (!snap.exists) continue;
-    const data = snap.data() as StudentData;
-    const yearData = data.years?.[yearKey];
+  for (const row of allRows) {
+    const payload = (row.data as Record<string, unknown> | undefined) ?? row;
+    const years = (payload.years as Record<string, YearData> | undefined) ?? {};
+    const yearData = years[yearKey];
     if (!yearData) continue;
     const terms = (yearData.terms || {}) as Record<string, { subjects?: { subject: string; grade: number }[] }>;
 
@@ -1515,22 +1533,27 @@ async function generateStudentProgressDetailPDF(
 ): Promise<ArrayBuffer> {
   void settings; // reserved for future logo use
 
+  const supabase = createServiceClient();
+
   // Use cached reference tables (raw_Subject + raw_tbl_Quiz) — avoids re-reading on every report
-  const [{ subjectMap, nameToCode, quizDescMap }, quizGradesSnap, progressSnap] = await Promise.all([
+  const [{ subjectMap, nameToCode, quizDescMap }, quizGradesRes, progressRes] = await Promise.all([
     getRefTables(),
-    adminDb
-      .collection("raw_tbl_Quiz_Grades")
-      .where("Student_Number", "==", studentNumber)
-      .where("Academic_Year", "==", yearKey)
-      .get(),
-    adminDb.collection("student_progress").doc(studentNumber).get(),
+    supabase
+      .from("raw_tbl_Quiz_Grades")
+      .select("*")
+      .eq("Student_Number", studentNumber)
+      .eq("Academic_Year", yearKey),
+    supabase
+      .from("student_progress")
+      .select("*")
+      .or(`id.eq.${studentNumber},student_number.eq.${studentNumber}`)
+      .maybeSingle(),
   ]);
 
   // Group quiz grades: Subject_Code → Exam_Code → entries
   type QuizEntry = { quizCode: string; quizDesc: string; grade: number };
   const gradesBySubject: Record<string, Record<string, QuizEntry[]>> = {};
-  quizGradesSnap.forEach((d) => {
-    const data = d.data();
+  (quizGradesRes.data || []).forEach((data: Record<string, unknown>) => {
     const subjCode = String(data.Subject_Code ?? "").trim();
     const examCode = String(data.Exam_Code ?? "").padStart(2, "0");
     const quizCode = String(data.Quiz_Code ?? "").trim();
@@ -1546,7 +1569,7 @@ async function generateStudentProgressDetailPDF(
   });
 
   // Student progress data
-  const progressData = progressSnap.data() as StudentData | undefined;
+  const progressData = ((progressRes.data?.data as StudentData | undefined) || (progressRes.data as unknown as StudentData | undefined));
   const yearData = progressData?.years?.[yearKey];
   const terms: Record<string, TermData> = (yearData?.terms as Record<string, TermData>) || {};
 
@@ -1987,8 +2010,13 @@ export async function POST(req: NextRequest) {
     // Fetch transcript settings (for logos, principal names)
     let settings: TranscriptSettings | null = null;
     try {
-      const settingsSnap = await adminDb.doc("parent_config/transcript_settings").get();
-      if (settingsSnap.exists) settings = settingsSnap.data() as TranscriptSettings;
+      const supabase = createServiceClient();
+      const { data: settingsRow } = await supabase
+        .from("parent_config")
+        .select("*")
+        .eq("id", "transcript_settings")
+        .maybeSingle();
+      if (settingsRow) settings = settingsRow as unknown as TranscriptSettings;
     } catch { /* continue without settings */ }
 
     if (type === "class_report") {
@@ -2041,12 +2069,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "studentNumber is required" }, { status: 400 });
     }
 
-    const docRef = adminDb.collection("student_progress").doc(studentNumber.trim());
-    const snap = await docRef.get();
-    if (!snap.exists) {
+    const supabase = createServiceClient();
+    const { data: progressRow } = await supabase
+      .from("student_progress")
+      .select("*")
+      .or(`id.eq.${studentNumber.trim()},student_number.eq.${studentNumber.trim()}`)
+      .maybeSingle();
+    if (!progressRow) {
       return NextResponse.json({ error: "Student not found" }, { status: 404 });
     }
-    const student = snap.data() as StudentData;
+    const student = ((progressRow.data as StudentData | undefined) || (progressRow as unknown as StudentData));
 
     if (type === "transcript") {
       const targetYears = yearList?.length

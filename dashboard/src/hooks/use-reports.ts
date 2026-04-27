@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
 import type { Report } from "@/types/report";
 
 /* ── In-memory cache (shared with session) ── */
@@ -24,16 +22,9 @@ export function useReports() {
 
     (async () => {
       try {
-        const q = query(
-          collection(getDb(), "reports"),
-          orderBy("date", "desc"),
-          limit(200)
-        );
-        const snap = await getDocs(q);
-        const data = snap.docs.map((d) => ({
-          ...(d.data() as Omit<Report, "id">),
-          id: d.id,
-        }));
+        const res = await fetch("/api/reports");
+        const json = await res.json();
+        const data: Report[] = (json.reports ?? []);
         reportsCache = { data, ts: Date.now() };
         setReports(data);
       } catch (err: unknown) {

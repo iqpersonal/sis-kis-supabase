@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /**
  * POST /api/contact-update/[token]
@@ -26,6 +26,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const supabase = createServiceClient();
   try {
     const { token } = await params;
     const { contact } = await req.json();
@@ -35,14 +36,17 @@ export async function POST(
     }
 
     // Validate token
-    const tokenRef = adminDb.collection("contact_update_tokens").doc(token);
-    const tokenDoc = await tokenRef.get();
+    const { data: tokenRow, error: tokenErr } = await supabase
+      .from("contact_update_tokens")
+      .select("*")
+      .eq("id", token)
+      .maybeSingle();
 
-    if (!tokenDoc.exists) {
+    if (tokenErr || !tokenRow) {
       return NextResponse.json({ error: "invalid_token", message: "Invalid link" }, { status: 404 });
     }
 
-    const td = tokenDoc.data()!;
+    const td = tokenRow as Record<string, unknown>;
 
     if (td.used) {
       return NextResponse.json({ error: "token_used", message: "This link has already been used" }, { status: 410 });
@@ -53,18 +57,17 @@ export async function POST(
     }
 
     // Fetch current family data
-    const famSnap = await adminDb
-      .collection("families")
-      .where("family_number", "==", td.family_number)
-      .limit(1)
-      .get();
+    const { data: famRow, error: famErr } = await supabase
+      .from("families")
+      .select("*")
+      .eq("family_number", String(td.family_number || ""))
+      .maybeSingle();
 
-    if (famSnap.empty) {
+    if (famErr || !famRow) {
       return NextResponse.json({ error: "family_not_found", message: "Family not found" }, { status: 404 });
     }
 
-    const famDoc = famSnap.docs[0];
-    const oldData = famDoc.data();
+    const oldData = famRow as Record<string, string>;
 
     // Build sanitized update — only allowed fields, trimmed strings
     const newValues: Record<string, string> = {};
@@ -100,14 +103,18 @@ export async function POST(
     }
 
     // Update family doc
-    await famDoc.ref.update({
+    const { error: famUpdateErr } = await supabase
+      .from("families")
+      .update({
       ...newValues,
       contact_updated_at: new Date().toISOString(),
       contact_updated_via: "whatsapp_form",
-    });
+      })
+      .eq("family_number", String(td.family_number || ""));
+    if (famUpdateErr) throw famUpdateErr;
 
     // Write audit record
-    await adminDb.collection("contact_updates").add({
+    const { error: auditErr } = await supabase.from("contact_updates").insert({
       family_number: td.family_number,
       token,
       old_values: oldValues,
@@ -116,9 +123,14 @@ export async function POST(
       submitted_at: new Date().toISOString(),
       verified_phone: true,
     });
+    if (auditErr) throw auditErr;
 
     // Mark token as used
-    await tokenRef.update({ used: true, submitted_at: new Date().toISOString() });
+    const { error: tokenUpdateErr } = await supabase
+      .from("contact_update_tokens")
+      .update({ used: true, submitted_at: new Date().toISOString() })
+      .eq("id", token);
+    if (tokenUpdateErr) throw tokenUpdateErr;
 
     return NextResponse.json({
       success: true,

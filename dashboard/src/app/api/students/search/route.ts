@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { verifyAuth } from "@/lib/api-auth";
 import { compareAlphabeticalNames } from "@/lib/name-sort";
 
@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req);
   if (!auth.ok) return auth.response;
+  const supabase = createServiceClient();
 
   const { searchParams } = req.nextUrl;
   const year = searchParams.get("year") || "25-26";
@@ -30,55 +31,55 @@ export async function GET(req: NextRequest) {
     type AllowedSection = { classCode: string; sectionCode: string };
     let allowedSections: AllowedSection[] | null = null;
     if (auth.role === "teacher") {
-      const userSnap = await adminDb.collection("admin_users").doc(auth.uid).get();
-      const supervisedIds: string[] = Array.isArray(userSnap.data()?.supervised_classes)
-        ? (userSnap.data()!.supervised_classes as string[])
+      const { data: teacherUser } = await supabase
+        .from("admin_users")
+        .select("supervised_classes")
+        .eq("id", auth.uid)
+        .single();
+
+      const supervisedIds: string[] = Array.isArray(teacherUser?.supervised_classes)
+        ? (teacherUser.supervised_classes as string[])
         : [];
       if (supervisedIds.length === 0) {
         return NextResponse.json({ students: [], total: 0, offset, limit: limitNum });
       }
-      const secRefs = supervisedIds.map((id) => adminDb.collection("sections").doc(id));
-      const secDocs = await adminDb.getAll(...secRefs);
-      allowedSections = secDocs
-        .filter((d) => d.exists)
-        .map((d) => ({
-          classCode: String(d.data()!.Class_Code || ""),
-          sectionCode: String(d.data()!.Section_Code || ""),
-        }));
+
+      const { data: sections } = await supabase
+        .from("sections")
+        .select("Class_Code, Section_Code, class_code, section_code")
+        .in("id", supervisedIds);
+
+      allowedSections = (sections || []).map((s: Record<string, unknown>) => ({
+        classCode: String(s.Class_Code || s.class_code || ""),
+        sectionCode: String(s.Section_Code || s.section_code || ""),
+      }));
+
       if (allowedSections.length === 0) {
         return NextResponse.json({ students: [], total: 0, offset, limit: limitNum });
       }
     }
 
     // Build registration query with server-side filters
-    let regQuery: FirebaseFirestore.Query = adminDb
-      .collection("registrations")
-      .where("Academic_Year", "==", year);
+    let regQuery = supabase
+      .from("registrations")
+      .select("id, student_number, major_code, class_code, section_code, termination_date, academic_year")
+      .eq("academic_year", year);
 
-    if (school) {
-      regQuery = regQuery.where("Major_Code", "==", school);
-    }
-    if (classCode) {
-      regQuery = regQuery.where("Class_Code", "==", classCode);
-    }
-    if (sectionCode) {
-      regQuery = regQuery.where("Section_Code", "==", sectionCode);
-    }
+    if (school) regQuery = regQuery.eq("major_code", school);
+    if (classCode) regQuery = regQuery.eq("class_code", classCode);
+    if (sectionCode) regQuery = regQuery.eq("section_code", sectionCode);
 
-    const regSnap = await regQuery.get();
+    const { data: registrations, error: regError } = await regQuery;
+    if (regError) throw regError;
 
-    // Collect unique student numbers
-    const regDocs = regSnap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        Student_Number: data.Student_Number,
-        Major_Code: data.Major_Code,
-        Class_Code: data.Class_Code,
-        Section_Code: data.Section_Code,
-        Termination_Date: data.Termination_Date || null,
-      };
-    });
+    const regDocs = (registrations || []).map((data) => ({
+      id: data.id,
+      Student_Number: (data as Record<string, unknown>).student_number,
+      Major_Code: (data as Record<string, unknown>).major_code,
+      Class_Code: (data as Record<string, unknown>).class_code,
+      Section_Code: (data as Record<string, unknown>).section_code,
+      Termination_Date: (data as Record<string, unknown>).termination_date || null,
+    }));
 
     // Apply status filter
     let filteredRegs = regDocs;
@@ -107,18 +108,19 @@ export async function GET(req: NextRequest) {
     // Batch-fetch student profile docs for the current slice (or all filtered regs for text search)
     const studentNumbers = [...new Set(regsToJoin.map((r) => String(r.Student_Number || "")))].filter(Boolean);
 
-    // Read student_progress docs directly by student number; doc IDs match Student_Number.
+    // Read student_progress rows by student_number.
     const studentMap = new Map<string, Record<string, unknown>>();
     for (let i = 0; i < studentNumbers.length; i += 100) {
       const batch = studentNumbers.slice(i, i + 100);
-      const refs = batch.map((studentNumber) =>
-        adminDb.collection("student_progress").doc(studentNumber)
-      );
-      const docs = await adminDb.getAll(...refs);
-      docs.forEach((d) => {
-        if (d.exists) {
-          studentMap.set(d.id, d.data() || {});
-        }
+      const { data: progressRows, error: progressError } = await supabase
+        .from("student_progress")
+        .select("*")
+        .in("student_number", batch);
+      if (progressError) throw progressError;
+
+      (progressRows || []).forEach((row) => {
+        const key = String((row as Record<string, unknown>).student_number || "");
+        if (key) studentMap.set(key, (row as Record<string, unknown>) || {});
       });
     }
 

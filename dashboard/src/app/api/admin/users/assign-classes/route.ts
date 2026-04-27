@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { getCached, setCache } from "@/lib/cache";
 import { CACHE_MEDIUM } from "@/lib/cache-headers";
 
@@ -13,13 +13,23 @@ import { CACHE_MEDIUM } from "@/lib/cache-headers";
 const EXCLUDED_CLASS_CODES = new Set(["34", "51"]); // 34=Terminated, 51=OtherC
 
 async function verifyCallerIsSuperAdmin(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   const token = authHeader.slice(7);
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (snap.exists) return snap.data()?.role === "super_admin";
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+    if (error || !user) return false;
+
+    const { data: profile } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profile) return profile.role === "super_admin";
     return false;
   } catch {
     return false;
@@ -28,6 +38,7 @@ async function verifyCallerIsSuperAdmin(req: NextRequest) {
 
 // ── GET: List available sections with class (grade) names ──────
 export async function GET(req: NextRequest) {
+  const supabase = createServiceClient();
   const authorized = await verifyCallerIsSuperAdmin(req);
   if (!authorized) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -39,41 +50,49 @@ export async function GET(req: NextRequest) {
     console.log("[assign-classes] GET params:", { yearParam, schoolParam, url: req.nextUrl.toString() });
 
     // Build class-code → grade-name lookup (only needed fields)
-    const classSnap = await adminDb
-      .collection("classes")
-      .select("Class_Code", "E_Class_Desc", "E_Class_Abbreviation", "A_Class_Desc", "A_Class_Abbreviation")
-      .limit(500)
-      .get();
+    const { data: classRows } = await supabase
+      .from("classes")
+      .select("Class_Code, class_code, E_Class_Desc, e_class_desc, E_Class_Abbreviation, e_class_abbreviation, A_Class_Desc, a_class_desc, A_Class_Abbreviation, a_class_abbreviation")
+      .limit(500);
     const classMap = new Map<string, { en: string; ar: string }>();
-    for (const doc of classSnap.docs) {
-      const d = doc.data();
-      classMap.set(d.Class_Code, {
-        en: d.E_Class_Desc || d.E_Class_Abbreviation || "",
-        ar: d.A_Class_Desc || d.A_Class_Abbreviation || "",
+    for (const d of classRows || []) {
+      const row = d as Record<string, unknown>;
+      const code = String(row.Class_Code || row.class_code || "");
+      if (!code) continue;
+      classMap.set(code, {
+        en: String(row.E_Class_Desc || row.e_class_desc || row.E_Class_Abbreviation || row.e_class_abbreviation || ""),
+        ar: String(row.A_Class_Desc || row.a_class_desc || row.A_Class_Abbreviation || row.a_class_abbreviation || ""),
       });
     }
 
     // Build set of active (class_code + section_code) combos from registrations
-    let regsQuery: FirebaseFirestore.Query = adminDb.collection("registrations");
+    let regsQuery = supabase
+      .from("registrations")
+      .select("Class_Code, class_code, Section_Code, section_code, Major_Code, major_code, Termination_Date, termination_date, Academic_Year, academic_year")
+      .limit(5000);
     if (yearParam) {
-      regsQuery = regsQuery.where("Academic_Year", "==", yearParam);
+      regsQuery = regsQuery.or(`Academic_Year.eq.${yearParam},academic_year.eq.${yearParam}`);
     }
-    const regsSnap = await regsQuery.select("Class_Code", "Section_Code", "Major_Code", "Termination_Date").limit(5000).get();
+    const { data: regsRows } = await regsQuery;
+
     const activeSections = new Set<string>();
-    for (const doc of regsSnap.docs) {
-      const d = doc.data();
-      if (d.Termination_Date) continue; // skip terminated students
-      const key = `${d.Class_Code}__${d.Section_Code}__${d.Major_Code || ""}`;
+    for (const d of regsRows || []) {
+      const row = d as Record<string, unknown>;
+      if (row.Termination_Date || row.termination_date) continue; // skip terminated students
+      const key = `${String(row.Class_Code || row.class_code || "")}__${String(row.Section_Code || row.section_code || "")}__${String(row.Major_Code || row.major_code || "")}`;
       activeSections.add(key);
     }
 
     // Fetch sections (filter by year in Firestore, school in memory to avoid composite index)
-    let sectionsQuery: FirebaseFirestore.Query = adminDb.collection("sections");
+    let sectionsQuery = supabase
+      .from("sections")
+      .select("id, Class_Code, class_code, Section_Code, section_code, Major_Code, major_code, E_Section_Name, e_section_name, A_Section_Name, a_section_name, Academic_Year, academic_year")
+      .limit(2000);
     if (yearParam) {
-      sectionsQuery = sectionsQuery.where("Academic_Year", "==", yearParam);
+      sectionsQuery = sectionsQuery.or(`Academic_Year.eq.${yearParam},academic_year.eq.${yearParam}`);
     }
-    const sectionsSnap = await sectionsQuery.limit(2000).get();
-    console.log("[assign-classes] sections fetched:", sectionsSnap.size, "| yearParam:", yearParam, "schoolParam:", schoolParam);
+    const { data: sectionRows } = await sectionsQuery;
+    console.log("[assign-classes] sections fetched:", (sectionRows || []).length, "| yearParam:", yearParam, "schoolParam:", schoolParam);
 
     const classes: {
       classId: string;
@@ -84,14 +103,14 @@ export async function GET(req: NextRequest) {
       campus: string;
     }[] = [];
 
-    for (const doc of sectionsSnap.docs) {
-      const d = doc.data();
-      const classCode = String(d.Class_Code || "");
+    for (const row of sectionRows || []) {
+      const d = row as Record<string, unknown>;
+      const classCode = String(d.Class_Code || d.class_code || "");
 
       // Skip non-academic entries (Terminated, OtherC)
       if (EXCLUDED_CLASS_CODES.has(classCode)) continue;
 
-      const majorCode = (d.Major_Code || "") as string;
+      const majorCode = String(d.Major_Code || d.major_code || "");
       const campus = majorCode.endsWith("-01") ? "Boys" : majorCode.endsWith("-02") ? "Girls" : "";
 
       // Filter by school/campus if requested
@@ -101,17 +120,17 @@ export async function GET(req: NextRequest) {
       }
 
       // Only include sections that have active students
-      const sectionCode = String(d.Section_Code || "");
+      const sectionCode = String(d.Section_Code || d.section_code || "");
       const activeKey = `${classCode}__${sectionCode}__${majorCode}`;
       if (!activeSections.has(activeKey)) continue;
 
-      const grade = classMap.get(d.Class_Code);
+      const grade = classMap.get(classCode);
       classes.push({
-        classId: doc.id,
+        classId: String(d.id || ""),
         className: grade?.en || `Class ${classCode}`,
         classNameAr: grade?.ar || "",
-        section: d.E_Section_Name || d.A_Section_Name || "",
-        year: d.Academic_Year || "",
+        section: String(d.E_Section_Name || d.e_section_name || d.A_Section_Name || d.a_section_name || ""),
+        year: String(d.Academic_Year || d.academic_year || ""),
         campus,
       });
     }
@@ -124,27 +143,35 @@ export async function GET(req: NextRequest) {
       if (cached) {
         subjects = cached;
       } else {
-        const [subjectsSnap, classSubjectsSnap] = await Promise.all([
-          adminDb.collection("subjects").limit(1000).get(),
-          adminDb.collection("raw_Class_Subjects").limit(5000).get(),
-        ]);
-        const subjectCodesWithGrades = new Set<string>();
-        classSubjectsSnap.docs.forEach((d) => {
-          const code = d.data().Subject_Code;
-          if (code) subjectCodesWithGrades.add(code);
-        });
-        subjects = subjectsSnap.docs
-          .map((doc) => {
-            const d = doc.data();
-            return {
-              code: d.Subject_Code || doc.id,
-              nameEn: d.E_Subject_Name || "",
-              nameAr: d.A_Subject_Name || "",
-            };
-          })
-          .filter((s) => subjectCodesWithGrades.has(s.code))
-          .sort((a, b) => a.nameEn.localeCompare(b.nameEn));
-        setCache("filtered_subjects", subjects);
+        try {
+          const [{ data: subjectsRows }, { data: classSubjectsRows }] = await Promise.all([
+            supabase.from("subjects").select("id, Subject_Code, subject_code, E_Subject_Name, e_subject_name, A_Subject_Name, a_subject_name").limit(1000),
+            supabase.from("raw_Class_Subjects").select("Subject_Code, subject_code").limit(5000),
+          ]);
+
+          const subjectCodesWithGrades = new Set<string>();
+          (classSubjectsRows || []).forEach((row) => {
+            const d = row as Record<string, unknown>;
+            const code = String(d.Subject_Code || d.subject_code || "");
+            if (code) subjectCodesWithGrades.add(code);
+          });
+
+          subjects = (subjectsRows || [])
+            .map((row) => {
+              const d = row as Record<string, unknown>;
+              return {
+                code: String(d.Subject_Code || d.subject_code || d.id || ""),
+                nameEn: String(d.E_Subject_Name || d.e_subject_name || ""),
+                nameAr: String(d.A_Subject_Name || d.a_subject_name || ""),
+              };
+            })
+            .filter((s) => !!s.code && subjectCodesWithGrades.has(s.code))
+            .sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+          setCache("filtered_subjects", subjects);
+        } catch {
+          // Subjects tables may not be migrated yet; keep endpoint functional.
+          subjects = [];
+        }
       }
     }
 
@@ -166,6 +193,7 @@ export async function GET(req: NextRequest) {
 
 // ── PUT: Assign sections to a teacher ──────────────────────────
 export async function PUT(req: NextRequest) {
+  const supabase = createServiceClient();
   const authorized = await verifyCallerIsSuperAdmin(req);
   if (!authorized) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -194,16 +222,27 @@ export async function PUT(req: NextRequest) {
     }
 
     // Verify the user exists and is a teacher
-    const userDoc = await adminDb.collection("admin_users").doc(uid).get();
-    if (!userDoc.exists) {
+    const { data: userDoc } = await supabase
+      .from("admin_users")
+      .select("id")
+      .eq("id", uid)
+      .maybeSingle();
+    if (!userDoc) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     // Update the teacher's assigned_classes
-    await adminDb.collection("admin_users").doc(uid).update({
-      assigned_classes: classes,
-      updatedAt: new Date().toISOString(),
-    });
+    const { error } = await supabase
+      .from("admin_users")
+      .update({
+        assigned_classes: classes,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", uid);
+
+    if (error) {
+      return NextResponse.json({ error: `Failed to update assignments: ${error.message}` }, { status: 500 });
+    }
 
     return NextResponse.json({ ok: true, count: classes.length });
   } catch (err) {

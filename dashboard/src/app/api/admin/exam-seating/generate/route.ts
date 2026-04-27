@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /* ── Auth ─────────────────────────────────────────────────────── */
 async function verifyAccess(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   try {
-    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (!snap.exists) return false;
-    const role = snap.data()?.role;
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(authHeader.slice(7));
+    if (error || !user) return false;
+
+    const { data: profile } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!profile) return false;
+    const role = profile.role;
     return ["super_admin", "school_admin", "academic_director"].includes(role);
   } catch {
     return false;
@@ -50,6 +60,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { scheduleId, campus } = body as { scheduleId: string; campus: string };
 
@@ -58,11 +69,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Load schedule
-    const schedDoc = await adminDb.collection("exam_schedules").doc(scheduleId).get();
-    if (!schedDoc.exists) {
+    const { data: schedule, error: schedErr } = await supabase
+      .from("exam_schedules")
+      .select("*")
+      .eq("id", scheduleId)
+      .maybeSingle();
+    if (schedErr) throw schedErr;
+    if (!schedule) {
       return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
     }
-    const schedule = schedDoc.data()!;
     const { academicYear, gradeGroup, days } = schedule as {
       academicYear: string;
       gradeGroup: string;
@@ -70,14 +85,16 @@ export async function POST(req: NextRequest) {
     };
 
     // 2. Load active halls for this campus
-    const hallsSnap = await adminDb
-      .collection("exam_halls")
-      .where("campus", "==", campus)
-      .where("isActive", "==", true)
-      .get();
+    const { data: hallsRows, error: hallsErr } = await supabase
+      .from("exam_halls")
+      .select("*")
+      .eq("campus", campus)
+      .eq("isActive", true)
+      .limit(500);
+    if (hallsErr) throw hallsErr;
 
-    const halls = hallsSnap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
+    const halls = (hallsRows || [])
+      .map((d: Record<string, unknown>) => ({ id: d.id, ...d }))
       .sort((a: any, b: any) => (b.rows * b.columns) - (a.rows * a.columns)) as any[];
 
     if (halls.length === 0) {
@@ -85,11 +102,17 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Load class code → grade name mapping
-    const classSnap = await adminDb.collection("classes").select("Class_Code", "E_Class_Desc").limit(500).get();
+    const { data: classRows, error: classErr } = await supabase
+      .from("classes")
+      .select("Class_Code, class_code, E_Class_Desc, e_class_desc")
+      .limit(500);
+    if (classErr) throw classErr;
     const classMap = new Map<string, string>();
-    for (const doc of classSnap.docs) {
-      const d = doc.data();
-      classMap.set(String(d.Class_Code), d.E_Class_Desc || `Class ${d.Class_Code}`);
+    for (const row of classRows || []) {
+      const d = row as Record<string, unknown>;
+      const classCode = String(d.Class_Code || d.class_code || "");
+      if (!classCode) continue;
+      classMap.set(classCode, String(d.E_Class_Desc || d.e_class_desc || `Class ${classCode}`));
     }
 
     // 4. Determine which class codes are in the grade group
@@ -97,30 +120,30 @@ export async function POST(req: NextRequest) {
 
     // 5. Load all registrations for this year + campus, filtered to grade group
     const majorCode = campus === "Boys" ? "0021-01" : "0021-02";
-    const regsSnap = await adminDb
-      .collection("registrations")
-      .where("Academic_Year", "==", academicYear)
-      .where("Major_Code", "==", majorCode)
-      .select("Student_Number", "Class_Code", "Section_Code", "Termination_Date")
-      .limit(10000)
-      .get();
+    const { data: regsRows, error: regsErr } = await supabase
+      .from("registrations")
+      .select("Student_Number, student_number, Class_Code, class_code, Section_Code, section_code, Termination_Date, termination_date, Major_Code, major_code, Academic_Year, academic_year")
+      .or(`Academic_Year.eq.${academicYear},academic_year.eq.${academicYear}`)
+      .or(`Major_Code.eq.${majorCode},major_code.eq.${majorCode}`)
+      .limit(10000);
+    if (regsErr) throw regsErr;
 
     // Build student list grouped by class+section
     const studentsByClassSection = new Map<string, { studentNumber: string; className: string; section: string }[]>();
     const studentNumbers = new Set<string>();
 
-    for (const doc of regsSnap.docs) {
-      const d = doc.data();
-      if (d.Termination_Date) continue;
-      const classCode = String(d.Class_Code || "");
+    for (const row of regsRows || []) {
+      const d = row as Record<string, unknown>;
+      if (d.Termination_Date || d.termination_date) continue;
+      const classCode = String(d.Class_Code || d.class_code || "");
       if (!validClassCodes.has(classCode)) continue;
 
-      const sn = String(d.Student_Number || "");
+      const sn = String(d.Student_Number || d.student_number || "");
       if (!sn || studentNumbers.has(sn)) continue; // skip duplicates
       studentNumbers.add(sn);
 
       const className = classMap.get(classCode) || `Class ${classCode}`;
-      const sectionCode = String(d.Section_Code || "");
+      const sectionCode = String(d.Section_Code || d.section_code || "");
       const key = `${classCode}__${sectionCode}`;
 
       if (!studentsByClassSection.has(key)) studentsByClassSection.set(key, []);
@@ -132,44 +155,69 @@ export async function POST(req: NextRequest) {
     const nameMap = new Map<string, string>();
     for (let i = 0; i < allSNs.length; i += 100) {
       const batch = allSNs.slice(i, i + 100);
-      const refs = batch.map((sn) => adminDb.collection("student_progress").doc(sn));
-      if (refs.length === 0) continue;
-      const docs = await adminDb.getAll(...refs);
-      for (const doc of docs) {
-        if (!doc.exists) continue;
-        const s = doc.data()!;
-        nameMap.set(doc.id, s.student_name || s.full_name_en || s.STUDENT_NAME_EN || doc.id);
+      const { data: bySnRows } = await supabase
+        .from("student_progress")
+        .select("id, student_number, student_name, full_name_en, STUDENT_NAME_EN")
+        .in("student_number", batch);
+
+      for (const row of bySnRows || []) {
+        const s = row as Record<string, unknown>;
+        const sn = String(s.student_number || "");
+        if (!sn) continue;
+        nameMap.set(sn, String(s.student_name || s.full_name_en || s.STUDENT_NAME_EN || sn));
+      }
+
+      const missing = batch.filter((sn) => !nameMap.has(sn));
+      if (missing.length > 0) {
+        const { data: byIdRows } = await supabase
+          .from("student_progress")
+          .select("id, student_name, full_name_en, STUDENT_NAME_EN")
+          .in("id", missing);
+
+        for (const row of byIdRows || []) {
+          const s = row as Record<string, unknown>;
+          const id = String(s.id || "");
+          if (!id) continue;
+          nameMap.set(id, String(s.student_name || s.full_name_en || s.STUDENT_NAME_EN || id));
+        }
       }
     }
 
     // 7. Load section names (section_code → section name)
-    const sectionsSnap = await adminDb
-      .collection("sections")
-      .where("Academic_Year", "==", academicYear)
-      .where("Major_Code", "==", majorCode)
-      .select("Class_Code", "Section_Code", "E_Section_Name")
-      .limit(2000)
-      .get();
+    const { data: sectionsRows, error: sectionsErr } = await supabase
+      .from("sections")
+      .select("Class_Code, class_code, Section_Code, section_code, E_Section_Name, e_section_name, Major_Code, major_code, Academic_Year, academic_year")
+      .or(`Academic_Year.eq.${academicYear},academic_year.eq.${academicYear}`)
+      .or(`Major_Code.eq.${majorCode},major_code.eq.${majorCode}`)
+      .limit(2000);
+    if (sectionsErr) throw sectionsErr;
 
     const sectionNameMap = new Map<string, string>();
-    for (const doc of sectionsSnap.docs) {
-      const d = doc.data();
-      sectionNameMap.set(`${d.Class_Code}__${d.Section_Code}`, d.E_Section_Name || String(d.Section_Code));
+    for (const row of sectionsRows || []) {
+      const d = row as Record<string, unknown>;
+      const classCode = String(d.Class_Code || d.class_code || "");
+      const sectionCode = String(d.Section_Code || d.section_code || "");
+      if (!classCode || !sectionCode) continue;
+      sectionNameMap.set(`${classCode}__${sectionCode}`, String(d.E_Section_Name || d.e_section_name || sectionCode));
     }
 
     // 8. Load all teachers for proctor assignment
-    const teachersSnap = await adminDb
-      .collection("admin_users")
-      .where("role", "==", "teacher")
-      .get();
+    const { data: teacherRows, error: teacherErr } = await supabase
+      .from("admin_users")
+      .select("id, email, displayName, display_name, assigned_classes")
+      .eq("role", "teacher")
+      .limit(2000);
+    if (teacherErr) throw teacherErr;
 
-    const allTeachers = teachersSnap.docs.map((d) => {
-      const data = d.data();
+    const allTeachers = (teacherRows || []).map((row) => {
+      const data = row as Record<string, unknown>;
+      const uid = String(data.id || "");
+      const email = String(data.email || "");
       return {
-        uid: d.id,
-        name: data.displayName || data.email || d.id,
-        email: data.email || "",
-        subjects: parseTeacherSubjects(data.assigned_classes || []),
+        uid,
+        name: String(data.displayName || data.display_name || email || uid),
+        email,
+        subjects: parseTeacherSubjects(Array.isArray(data.assigned_classes) ? (data.assigned_classes as any[]) : []),
       };
     });
 
@@ -331,7 +379,9 @@ export async function POST(req: NextRequest) {
       }
 
       // Save this day's plan
-      const planDoc = await adminDb.collection("exam_seating_plans").add({
+      const planId = crypto.randomUUID();
+      const { error: planErr } = await supabase.from("exam_seating_plans").insert({
+        id: planId,
         scheduleId,
         examDate: day.date,
         subjectName: day.subjectName,
@@ -359,9 +409,10 @@ export async function POST(req: NextRequest) {
         totalStudents: hallPlans.reduce((sum, h) => sum + h.studentCount, 0),
         generatedAt: new Date().toISOString(),
       });
+      if (planErr) throw planErr;
 
       generatedPlans.push({
-        id: planDoc.id,
+        id: planId,
         examDate: day.date,
         subjectName: day.subjectName,
         hallCount: hallPlans.length,

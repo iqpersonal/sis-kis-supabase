@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { CACHE_LONG } from "@/lib/cache-headers";
 
 export async function GET() {
+  const supabase = createServiceClient();
   try {
-    const snap = await adminDb.collection("academic_years").get();
-    const years = snap.docs
-      .map((d) => String(d.data().Academic_Year ?? ""))
+    const { data, error } = await supabase
+      .from("academic_years")
+      .select("id, Academic_Year, academic_year")
+      .limit(500);
+    if (error) throw error;
+
+    const years = (data || [])
+      .map((d: Record<string, unknown>) => String(d.Academic_Year ?? d.academic_year ?? d.id ?? ""))
       .filter(Boolean)
       .sort();
     return NextResponse.json({ years }, { headers: CACHE_LONG });

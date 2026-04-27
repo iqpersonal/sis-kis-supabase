@@ -16,8 +16,6 @@ import {
 import {
   BarChart3, TrendingUp, Download, Users,
 } from "lucide-react";
-import { getDb } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
 
 /* ── Status flow for funnel ── */
 const FUNNEL_STAGES = [
@@ -53,10 +51,9 @@ export default function ReportsPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const db = getDb();
-      const snap = await getDocs(collection(db, "admission_enquiries"));
-      const all: Enquiry[] = [];
-      snap.forEach((d) => all.push(d.data() as Enquiry));
+      const res = await fetch("/api/admissions/enquiries?limit=1000", { cache: "no-store" });
+      const json = await res.json();
+      const all = (json.enquiries || []) as Enquiry[];
       all.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setEnquiries(all);
     } catch (err) {

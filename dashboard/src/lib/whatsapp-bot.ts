@@ -13,7 +13,7 @@
  * (the parent already messaged us first).
  */
 
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { sendText, normalizePhone, isWhatsAppConfigured } from "@/lib/whatsapp";
 import { sendEmail } from "@/lib/email-service";
 
@@ -461,21 +461,22 @@ function buildPhoneVariants(phone: string): string[] {
  * Previously did 8 sequential queries; now resolves in a single round-trip.
  */
 async function lookupFamilyByPhone(phone: string): Promise<FamilyDoc | null> {
+  const supabase = createServiceClient();
   const variants = buildPhoneVariants(phone);
   const fields = ["father_phone", "mother_phone"] as const;
 
   // Fire all queries in parallel
   const queries = fields.flatMap(field =>
     variants.map(variant =>
-      adminDb.collection("families").where(field, "==", variant).limit(1).get()
+      supabase.from("families").select("*").eq(field, variant).limit(1).maybeSingle()
     )
   );
 
   const results = await Promise.all(queries);
 
-  for (const snap of results) {
-    if (!snap.empty) {
-      return snap.docs[0].data() as FamilyDoc;
+  for (const result of results) {
+    if (result.data) {
+      return result.data as unknown as FamilyDoc;
     }
   }
 
@@ -489,17 +490,30 @@ async function lookupFamilyByPhone(phone: string): Promise<FamilyDoc | null> {
 async function prefetchChildrenProgress(
   studentNumbers: string[]
 ): Promise<Map<string, Record<string, unknown>>> {
+  const supabase = createServiceClient();
   const map = new Map<string, Record<string, unknown>>();
   if (studentNumbers.length === 0) return map;
 
-  const fetches = studentNumbers.map(async (sn) => {
+  const chunkSize = 200;
+  for (let i = 0; i < studentNumbers.length; i += chunkSize) {
+    const chunk = studentNumbers.slice(i, i + chunkSize);
     try {
-      const doc = await adminDb.collection("student_progress").doc(sn).get();
-      if (doc.exists) map.set(sn, doc.data() as Record<string, unknown>);
-    } catch { /* skip */ }
-  });
+      const [{ data: byStudent }, { data: byId }] = await Promise.all([
+        supabase.from("student_progress").select("*").in("student_number", chunk),
+        supabase.from("student_progress").select("*").in("id", chunk),
+      ]);
 
-  await Promise.all(fetches);
+      for (const row of [...(byStudent || []), ...(byId || [])]) {
+        const r = row as Record<string, unknown>;
+        const key = String(r.student_number || r.id || "");
+        if (!key) continue;
+        const payload = (r.data as Record<string, unknown> | undefined) || r;
+        map.set(key, payload);
+      }
+    } catch {
+      /* skip */
+    }
+  }
   return map;
 }
 
@@ -526,8 +540,10 @@ async function logBotInteraction(
   action: string,
   familyNumber?: string
 ): Promise<void> {
+  const supabase = createServiceClient();
   try {
-    await adminDb.collection("whatsapp_bot_log").add({
+    await supabase.from("whatsapp_bot_log").insert({
+      id: crypto.randomUUID(),
       phone,
       message: message.slice(0, 500),
       action,
@@ -552,12 +568,26 @@ async function reply(to: string, text: string): Promise<void> {
  * ═══════════════════════════════════════════════════════════════ */
 
 async function getSession(phone: string): Promise<AdmissionSession | null> {
+  const supabase = createServiceClient();
   try {
-    const doc = await adminDb.collection("whatsapp_sessions").doc(phone).get();
-    if (!doc.exists) return null;
-    const session = doc.data() as AdmissionSession;
+    const { data: row } = await supabase
+      .from("whatsapp_sessions")
+      .select("*")
+      .eq("id", phone)
+      .maybeSingle();
+    if (!row) return null;
+    const r = row as Record<string, unknown>;
+    const session: AdmissionSession = {
+      flow: (r.flow as AdmissionSession["flow"]) || "admission_enquiry",
+      step: (r.step as AdmissionSession["step"]) || "ask_admission",
+      current_child: Number(r.current_child || 0),
+      total_children: Number(r.total_children || 0),
+      data: (r.data as AdmissionSession["data"]) || { students: [] },
+      created_at: String(r.created_at || ""),
+      expires_at: String(r.expires_at || ""),
+    };
     if (new Date(session.expires_at) < new Date()) {
-      await adminDb.collection("whatsapp_sessions").doc(phone).delete();
+      await supabase.from("whatsapp_sessions").delete().eq("id", phone);
       return null;
     }
     return session;
@@ -567,13 +597,26 @@ async function getSession(phone: string): Promise<AdmissionSession | null> {
 }
 
 async function setSession(phone: string, session: AdmissionSession): Promise<void> {
+  const supabase = createServiceClient();
   session.expires_at = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-  await adminDb.collection("whatsapp_sessions").doc(phone).set(session);
+  await supabase.from("whatsapp_sessions").upsert({
+    id: phone,
+    phone,
+    flow: session.flow,
+    step: session.step,
+    current_child: session.current_child,
+    total_children: session.total_children,
+    data: session.data,
+    created_at: session.created_at,
+    expires_at: session.expires_at,
+    updated_at: new Date().toISOString(),
+  });
 }
 
 async function clearSession(phone: string): Promise<void> {
+  const supabase = createServiceClient();
   try {
-    await adminDb.collection("whatsapp_sessions").doc(phone).delete();
+    await supabase.from("whatsapp_sessions").delete().eq("id", phone);
   } catch { /* ignore */ }
 }
 
@@ -870,15 +913,22 @@ function buildConfirmationMessage(phone: string, session: AdmissionSession): str
 async function lookupExistingEnquiry(phone: string): Promise<{
   ref_number: string; parent_name: string; created_at: string;
 } | null> {
+  const supabase = createServiceClient();
   try {
-    const snap = await adminDb
-      .collection("admission_enquiries")
-      .where("phone", "==", phone)
+    const { data: row } = await supabase
+      .from("admission_enquiries")
+      .select("ref_number,parent_name,created_at")
+      .eq("phone", phone)
+      .order("created_at", { ascending: false })
       .limit(1)
-      .get();
-    if (snap.empty) return null;
-    const d = snap.docs[0].data();
-    return { ref_number: d.ref_number, parent_name: d.parent_name, created_at: d.created_at };
+      .maybeSingle();
+    if (!row) return null;
+    const d = row as Record<string, unknown>;
+    return {
+      ref_number: String(d.ref_number || ""),
+      parent_name: String(d.parent_name || ""),
+      created_at: String(d.created_at || ""),
+    };
   } catch (err) {
     console.error("[WA Bot] Error looking up existing enquiry:", err);
     return null;
@@ -890,18 +940,20 @@ async function lookupExistingEnquiry(phone: string): Promise<{
  * ═══════════════════════════════════════════════════════════════ */
 
 async function saveAdmissionEnquiry(phone: string, session: AdmissionSession): Promise<string> {
-  // Atomic counter for ref number
-  const counterRef = adminDb.collection("admission_config").doc("counter");
-  const newNum = await adminDb.runTransaction(async (tx) => {
-    const doc = await tx.get(counterRef);
-    const current = doc.exists ? (doc.data()?.last_number || 1000) : 1000;
-    const next = current + 1;
-    tx.set(counterRef, { last_number: next });
-    return next;
-  });
+  const supabase = createServiceClient();
+  // Best-effort counter increment
+  const { data: counter } = await supabase
+    .from("admission_config")
+    .select("last_number")
+    .eq("id", "counter")
+    .maybeSingle();
+  const current = Number((counter as Record<string, unknown> | null)?.last_number ?? 1000);
+  const newNum = current + 1;
+  await supabase.from("admission_config").upsert({ id: "counter", last_number: newNum, updated_at: new Date().toISOString() });
   const refNumber = `ADM-${newNum}`;
 
-  await adminDb.collection("admission_enquiries").doc(refNumber).set({
+  await supabase.from("admission_enquiries").upsert({
+    id: refNumber,
     ref_number: refNumber,
     phone,
     parent_name: session.data.parent_name,
@@ -1007,11 +1059,12 @@ async function sendAdmissionEmail(
   });
 
   if (result.sent) {
+    const supabase = createServiceClient();
     try {
-      await adminDb.collection("admission_enquiries").doc(refNumber).update({
+      await supabase.from("admission_enquiries").update({
         email_sent: true,
         updated_at: new Date().toISOString(),
-      });
+      }).eq("id", refNumber);
     } catch { /* non-critical */ }
   }
 }

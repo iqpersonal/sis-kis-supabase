@@ -1,21 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  limit,
-  orderBy,
-  startAfter,
-  where,
-  getCountFromServer,
-  type DocumentSnapshot,
-  type QueryConstraint,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { useEffect, useState, useCallback } from "react";
 
 /* ------------------------------------------------------------------ */
 /*  In-memory cache to avoid re-fetching identical Firestore queries   */
@@ -67,44 +52,9 @@ export function useCollectionStats() {
 
     (async () => {
       try {
-        const db = getDb();
-        const collections = [
-          { name: "Students", collection: "students" },
-          { name: "Sponsors", collection: "sponsors" },
-          { name: "Registrations", collection: "registrations" },
-          { name: "Charges", collection: "student_charges" },
-          { name: "Invoices", collection: "student_invoices" },
-          { name: "Installments", collection: "student_installments" },
-          { name: "Discounts", collection: "student_discounts" },
-          { name: "Absence", collection: "student_absence" },
-          { name: "Exam Results", collection: "student_exam_results" },
-          { name: "Tardy", collection: "student_tardy" },
-          { name: "Sections", collection: "sections" },
-          { name: "Section Averages", collection: "section_averages" },
-          { name: "Classes", collection: "classes" },
-          { name: "Subjects", collection: "subjects" },
-          { name: "Employees", collection: "employees" },
-          { name: "Academic Years", collection: "academic_years" },
-        ];
-
-        // Run all count queries in parallel instead of sequentially
-        const results = await Promise.all(
-          collections.map(async (col) => {
-            try {
-              const snap = await getCountFromServer(
-                collection(db, col.collection)
-              );
-              return {
-                name: col.name,
-                collection: col.collection,
-                count: snap.data().count,
-              };
-            } catch {
-              return { ...col, count: 0 };
-            }
-          })
-        );
-
+        const res = await fetch("/api/sis-data?action=collection-stats");
+        const json = await res.json();
+        const results: CollectionStats[] = json.stats ?? [];
         setCache(cacheKey, results);
         setStats(results);
       } catch (err: unknown) {
@@ -121,7 +71,7 @@ export function useCollectionStats() {
   return { stats, loading, error };
 }
 
-/** Fetch documents from a Firestore collection with optional limit (cached 24 h) */
+/** Fetch documents from a Supabase table with optional limit (cached 24 h) */
 export function useCollection<T extends { id: string }>(
   collectionName: string,
   maxDocs = 500
@@ -145,13 +95,14 @@ export function useCollection<T extends { id: string }>(
     }
     (async () => {
       try {
-        const db = getDb();
-        const q = query(collection(db, collectionName), limit(maxDocs));
-        const snap = await getDocs(q);
-        const docs = snap.docs.map((d) => ({
-          ...(d.data() as Omit<T, "id">),
-          id: d.id,
-        })) as T[];
+        const params = new URLSearchParams({
+          action: "collection",
+          table: collectionName,
+          limit: String(maxDocs),
+        });
+        const res = await fetch(`/api/sis-data?${params}`);
+        const json = await res.json();
+        const docs = (json.data ?? []) as T[];
         setCache(cacheKey, docs);
         setData(docs);
       } catch (err: unknown) {
@@ -197,19 +148,16 @@ export function useFilteredCollection<T extends { id: string }>(
     setLoading(true);
     (async () => {
       try {
-        const db = getDb();
-        // Try both string and number representations
-        const yearNum = Number(academicYear);
-        const constraints: QueryConstraint[] = [
-          where(yearField, "==", isNaN(yearNum) ? academicYear : yearNum),
-          limit(maxDocs),
-        ];
-        const q = query(collection(db, collectionName), ...constraints);
-        const snap = await getDocs(q);
-        const docs = snap.docs.map((d) => ({
-          ...(d.data() as Omit<T, "id">),
-          id: d.id,
-        })) as T[];
+        const params = new URLSearchParams({
+          action: "collection",
+          table: collectionName,
+          year: academicYear!,
+          yearField,
+          limit: String(maxDocs),
+        });
+        const res = await fetch(`/api/sis-data?${params}`);
+        const json = await res.json();
+        const docs = (json.data ?? []) as T[];
         setCache(cacheKey, docs);
         setData(docs);
       } catch (err: unknown) {
@@ -252,21 +200,9 @@ export function useRegistrationCountsByYear(years: string[]) {
     setLoading(true);
     (async () => {
       try {
-        const db = getDb();
-        const results: { year: string; count: number }[] = [];
-        // Use server-side aggregation counts instead of fetching all docs
-        const promises = years.map(async (year) => {
-          const yearNum = Number(year);
-          const q = query(
-            collection(db, "registrations"),
-            where("Academic_Year", "==", isNaN(yearNum) ? year : yearNum)
-          );
-          const snap = await getCountFromServer(q);
-          return { year, count: snap.data().count };
-        });
-        const counts = await Promise.all(promises);
-        results.push(...counts);
-        results.sort((a, b) => a.year.localeCompare(b.year));
+        const res = await fetch(`/api/sis-data?action=reg-counts&years=${encodeURIComponent(years.join(","))}`);
+        const json = await res.json();
+        const results: { year: string; count: number }[] = json.counts ?? [];
         setCache(cacheKey, results);
         setData(results);
       } catch (err) {
@@ -491,13 +427,11 @@ export function useSummary(academicYear: string | null) {
     setLoading(true);
     (async () => {
       try {
-        const db = getDb();
-        const docRef = doc(db, "summaries", academicYear);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data() as YearSummary;
-          setCache(cacheKey, data);
-          setSummary(data);
+        const res = await fetch(`/api/sis-data?action=summary&year=${encodeURIComponent(academicYear!)}`);
+        const json = await res.json();
+        if (json.data) {
+          setCache(cacheKey, json.data);
+          setSummary(json.data as YearSummary);
         } else {
           setSummary(null);
         }
@@ -605,13 +539,11 @@ export function useQuizSummary(academicYear: string | null) {
     setLoading(true);
     (async () => {
       try {
-        const db = getDb();
-        const docRef = doc(db, "quiz_summaries", academicYear);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data() as QuizSummary;
-          setCache(cacheKey, data);
-          setQuizSummary(data);
+        const res = await fetch(`/api/sis-data?action=quiz-summary&year=${encodeURIComponent(academicYear!)}`);
+        const json = await res.json();
+        if (json.data) {
+          setCache(cacheKey, json.data);
+          setQuizSummary(json.data as QuizSummary);
         } else {
           setQuizSummary(null);
         }
@@ -655,7 +587,6 @@ export function usePaginatedCollection<T extends { id: string }>(
   const [hasNext, setHasNext] = useState(false);
 
   // Stack of last-document cursors for each visited page
-  const cursorsRef = useRef<(DocumentSnapshot | null)[]>([null]);
 
   // Fetch count (filtered if year supplied) — cached 30 min
   useEffect(() => {
@@ -668,21 +599,12 @@ export function usePaginatedCollection<T extends { id: string }>(
 
     (async () => {
       try {
-        const db = getDb();
-        let q;
-        if (filterYear) {
-          const yearNum = Number(filterYear);
-          q = query(
-            collection(db, collectionName),
-            where("Academic_Year", "==", isNaN(yearNum) ? filterYear : yearNum)
-          );
-        } else {
-          q = collection(db, collectionName);
-        }
-        const snap = await getCountFromServer(q);
-        const count = snap.data().count;
-        setCache(countCacheKey, count);
-        setTotalCount(count);
+        const params = new URLSearchParams({ action: "collection", table: collectionName, count: "1" });
+        if (filterYear) params.set("year", filterYear);
+        const res = await fetch(`/api/sis-data?${params}`);
+        const json = await res.json();
+        setCache(countCacheKey, json.count ?? 0);
+        setTotalCount(json.count ?? 0);
       } catch {
         /* count is non-critical */
       }
@@ -695,43 +617,18 @@ export function usePaginatedCollection<T extends { id: string }>(
       setLoading(true);
       setError(null);
       try {
-        const db = getDb();
-        const constraints: QueryConstraint[] = [];
-
-        // Year filter
-        if (filterYear) {
-          const yearNum = Number(filterYear);
-          constraints.push(
-            where("Academic_Year", "==", isNaN(yearNum) ? filterYear : yearNum)
-          );
-        }
-
-        constraints.push(orderBy(orderField));
-        constraints.push(limit(size + 1)); // fetch one extra to detect next page
-
-        const cursor = cursorsRef.current[pageIndex];
-        if (cursor) {
-          constraints.push(startAfter(cursor));
-        }
-
-        const q = query(collection(db, collectionName), ...constraints);
-        const snap = await getDocs(q);
-
-        const docs = snap.docs.map((d) => ({
-          ...(d.data() as Omit<T, "id">),
-          id: d.id,
-        })) as T[];
-
-        if (docs.length > size) {
-          // There is a next page
-          setHasNext(true);
-          docs.pop(); // remove the extra probe doc
-          // Store cursor for next page (last doc of current page)
-          cursorsRef.current[pageIndex + 1] = snap.docs[size - 1];
-        } else {
-          setHasNext(false);
-        }
-
+        const params = new URLSearchParams({
+          action: "collection",
+          table: collectionName,
+          orderField,
+          limit: String(size),
+          page: String(pageIndex),
+        });
+        if (filterYear) params.set("year", filterYear);
+        const res = await fetch(`/api/sis-data?${params}`);
+        const json = await res.json();
+        const docs = (json.data ?? []) as T[];
+        setHasNext(docs.length === size);
         setData(docs);
         setPage(pageIndex);
       } catch (err: unknown) {
@@ -748,8 +645,6 @@ export function usePaginatedCollection<T extends { id: string }>(
 
   // Refetch when year changes
   useEffect(() => {
-    cursorsRef.current = [null];
-    setPage(0);
     fetchPage(0, pageSize);
   }, [fetchPage, pageSize]);
 
@@ -767,7 +662,6 @@ export function usePaginatedCollection<T extends { id: string }>(
 
   const setPageSize = useCallback(
     (size: number) => {
-      cursorsRef.current = [null];
       setPageSizeState(size);
       // useEffect will refetch page 0
     },
@@ -798,7 +692,7 @@ export function usePaginatedCollection<T extends { id: string }>(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Delinquency student lists (lazy-loaded from separate Firestore docs) */
+/*  Delinquency student lists (lazy-loaded from Supabase)              */
 /* ------------------------------------------------------------------ */
 export type DelinquencyStudent = {
   studentNumber: string;
@@ -837,16 +731,12 @@ export function useDelinquencyStudents(
     }
     setLoading(true);
     try {
-      const db = getDb();
-      const docRef = doc(db, "delinquency_students", `${year}_${filterKey}`);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const d = snap.data() as DelinquencyStudentsData;
-        setCache(cacheKey, d);
-        setData(d);
-      } else {
-        setData({ fully_paid_students: [], zero_paid_students: [] });
-      }
+      const params = new URLSearchParams({ action: "delinquency", year, school: filterKey });
+      const res = await fetch(`/api/sis-data?${params}`);
+      const json = await res.json();
+      const d: DelinquencyStudentsData = json.data ?? { fully_paid_students: [], zero_paid_students: [] };
+      setCache(cacheKey, d);
+      setData(d);
     } catch (e) {
       console.error("Error loading delinquency students:", e);
       setData({ fully_paid_students: [], zero_paid_students: [] });

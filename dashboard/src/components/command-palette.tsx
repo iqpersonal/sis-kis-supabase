@@ -37,8 +37,7 @@ import {
 import { useLanguage } from "@/context/language-context";
 import { useTheme } from "@/context/theme-context";
 import type { TranslationKeys } from "@/lib/i18n/translations";
-import { getDb } from "@/lib/firebase";
-import { collection, query, where, getDocs, limit, orderBy } from "firebase/firestore";
+
 
 /* ------------------------------------------------------------------ */
 /*  Navigation items (mirrors sidebar)                                 */
@@ -84,52 +83,18 @@ interface StudentResult {
 }
 
 async function searchStudents(term: string): Promise<StudentResult[]> {
-  const db = getDb();
-  if (!db || !term || term.length < 2) return [];
-
-  const results: StudentResult[] = [];
-
-  // Search by student number (exact prefix match)
-  if (/^\d+$/.test(term)) {
-    const q = query(
-      collection(db, "students"),
-      where("Student_Number", ">=", Number(term)),
-      where("Student_Number", "<=", Number(term) + 999),
-      limit(8)
-    );
-    const snap = await getDocs(q);
-    snap.forEach((doc) => {
-      const d = doc.data();
-      results.push({
-        Student_Number: String(d.Student_Number || ""),
-        E_Full_Name: String(d.E_Full_Name || d.E_Child_Name || ""),
-        A_Full_Name: String(d.A_Full_Name || d.A_Child_Name || ""),
-      });
-    });
-    return results;
-  }
-
-  // For name search, query browse_index or students with a text prefix
-  // Since Firestore doesn't support full-text, do a prefix match on E_Full_Name
-  const upperTerm = term.charAt(0).toUpperCase() + term.slice(1);
-  const q = query(
-    collection(db, "students"),
-    orderBy("E_Full_Name"),
-    where("E_Full_Name", ">=", upperTerm),
-    where("E_Full_Name", "<=", upperTerm + "\uf8ff"),
-    limit(8)
-  );
-  const snap = await getDocs(q);
-  snap.forEach((doc) => {
-    const d = doc.data();
-    results.push({
+  if (!term || term.length < 2) return [];
+  try {
+    const res = await fetch(`/api/students/search?q=${encodeURIComponent(term)}&limit=8`);
+    const json = await res.json();
+    return (json.students ?? []).map((d: Record<string, unknown>) => ({
       Student_Number: String(d.Student_Number || ""),
-      E_Full_Name: String(d.E_Full_Name || d.E_Child_Name || ""),
-      A_Full_Name: String(d.A_Full_Name || d.A_Child_Name || ""),
-    });
-  });
-
-  return results;
+      E_Full_Name: String(d.E_Full_Name || ""),
+      A_Full_Name: String(d.A_Full_Name || ""),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------------ */

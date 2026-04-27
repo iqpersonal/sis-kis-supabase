@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /* ── Auth ─────────────────────────────────────────────────────── */
 async function verifyAccess(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   try {
-    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (!snap.exists) return false;
-    const role = snap.data()?.role;
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(authHeader.slice(7));
+    if (error || !user) return false;
+
+    const { data: profile } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!profile) return false;
+    const role = profile.role;
     return ["super_admin", "school_admin", "academic_director"].includes(role);
   } catch {
     return false;
@@ -22,6 +32,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const scheduleId = req.nextUrl.searchParams.get("scheduleId");
     const campus = req.nextUrl.searchParams.get("campus");
 
@@ -29,14 +40,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "scheduleId required" }, { status: 400 });
     }
 
-    let query: FirebaseFirestore.Query = adminDb
-      .collection("exam_seating_plans")
-      .where("scheduleId", "==", scheduleId);
+    let query = supabase
+      .from("exam_seating_plans")
+      .select("*")
+      .eq("scheduleId", scheduleId)
+      .limit(2000);
 
-    if (campus) query = query.where("campus", "==", campus);
+    if (campus) query = query.eq("campus", campus);
 
-    const snap = await query.orderBy("examDate").get();
-    const plans = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const plans = (data || [])
+      .map((row: Record<string, unknown>) => ({ id: row.id, ...row }))
+      .sort((a, b) => String(a.examDate || "").localeCompare(String(b.examDate || "")));
 
     return NextResponse.json({ plans });
   } catch (err) {
@@ -51,6 +68,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const { scheduleId, campus } = (await req.json()) as {
       scheduleId: string;
       campus?: string;
@@ -60,18 +78,24 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "scheduleId required" }, { status: 400 });
     }
 
-    let query: FirebaseFirestore.Query = adminDb
-      .collection("exam_seating_plans")
-      .where("scheduleId", "==", scheduleId);
+    let findQuery = supabase
+      .from("exam_seating_plans")
+      .select("id")
+      .eq("scheduleId", scheduleId)
+      .limit(5000);
 
-    if (campus) query = query.where("campus", "==", campus);
+    if (campus) findQuery = findQuery.eq("campus", campus);
 
-    const snap = await query.get();
-    const batch = adminDb.batch();
-    snap.docs.forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
+    const { data: rows, error: findErr } = await findQuery;
+    if (findErr) throw findErr;
 
-    return NextResponse.json({ ok: true, deleted: snap.size });
+    const ids = (rows || []).map((r: Record<string, unknown>) => String(r.id || "")).filter(Boolean);
+    if (ids.length === 0) return NextResponse.json({ ok: true, deleted: 0 });
+
+    const { error: delErr } = await supabase.from("exam_seating_plans").delete().in("id", ids);
+    if (delErr) throw delErr;
+
+    return NextResponse.json({ ok: true, deleted: ids.length });
   } catch (err) {
     console.error("[exam-seating-plan] DELETE error:", err);
     return NextResponse.json({ error: "Failed to delete plans" }, { status: 500 });

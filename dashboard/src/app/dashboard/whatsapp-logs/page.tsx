@@ -26,17 +26,6 @@ import {
   ArrowDownUp,
   RefreshCw,
 } from "lucide-react";
-import {
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  where,
-  limit,
-  startAfter,
-  QueryDocumentSnapshot,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
 
 /* ─── Types ─── */
 
@@ -139,7 +128,7 @@ export default function WhatsAppLogsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [botPage, setBotPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -152,42 +141,38 @@ export default function WhatsAppLogsPage() {
   const fetchLogs = useCallback(async (append = false) => {
     append ? setLoadingMore(true) : setLoading(true);
     try {
-      const db = getDb();
-      const col = collection(db, "whatsapp_bot_log");
-      const constraints: Parameters<typeof query>[1][] = [
-        orderBy("timestamp", sortDesc ? "desc" : "asc"),
-        limit(PAGE_SIZE),
-      ];
-      if (actionFilter) constraints.splice(0, 0, where("action", "==", actionFilter));
-      if (append && lastDoc) constraints.push(startAfter(lastDoc));
+      const nextPage = append ? botPage + 1 : 1;
+      const params = new URLSearchParams({
+        view: "bot",
+        page: String(nextPage),
+        limit: String(PAGE_SIZE),
+        sort: sortDesc ? "desc" : "asc",
+      });
+      if (actionFilter) params.set("action", actionFilter);
 
-      const snap = await getDocs(query(col, ...constraints));
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as BotLogEntry));
+      const res = await fetch(`/api/whatsapp/logs?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      const rows = (json.logs || []) as BotLogEntry[];
 
       setLogs((prev) => (append ? [...prev, ...rows] : rows));
-      setHasMore(snap.docs.length === PAGE_SIZE);
-      setLastDoc(snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null);
+      setHasMore(Boolean(json.hasMore));
+      setBotPage(nextPage);
     } catch (err) {
       console.error("Failed to fetch bot logs:", err);
     } finally {
       append ? setLoadingMore(false) : setLoading(false);
     }
-  }, [actionFilter, sortDesc, lastDoc]);
+  }, [actionFilter, sortDesc, botPage]);
 
   /* ── Fetch admission enquiries ── */
   const fetchEnquiries = useCallback(async () => {
     setLoading(true);
     try {
-      const db = getDb();
-      const col = collection(db, "admission_enquiries");
-      const constraints: Parameters<typeof query>[1][] = [
-        orderBy("created_at", "desc"),
-        limit(100),
-      ];
-      if (statusFilter) constraints.splice(0, 0, where("status", "==", statusFilter));
-
-      const snap = await getDocs(query(col, ...constraints));
-      setEnquiries(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AdmissionEnquiry)));
+      const params = new URLSearchParams({ view: "admission" });
+      if (statusFilter) params.set("status", statusFilter);
+      const res = await fetch(`/api/whatsapp/logs?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      setEnquiries((json.enquiries || []) as AdmissionEnquiry[]);
     } catch (err) {
       console.error("Failed to fetch admission enquiries:", err);
     } finally {
@@ -198,17 +183,13 @@ export default function WhatsAppLogsPage() {
   /* ── Fetch stats ── */
   const fetchStats = useCallback(async () => {
     try {
-      const db = getDb();
-      const [allSnap, unregSnap, admSnap] = await Promise.all([
-        getDocs(query(collection(db, "whatsapp_bot_log"), limit(1000))),
-        getDocs(query(collection(db, "whatsapp_bot_log"), where("action", "==", "unregistered"), limit(1000))),
-        getDocs(query(collection(db, "admission_enquiries"), limit(1000))),
-      ]);
+      const res = await fetch("/api/whatsapp/logs?view=stats", { cache: "no-store" });
+      const json = await res.json();
       setStats({
-        total: allSnap.size,
-        registered: allSnap.size - unregSnap.size,
-        unregistered: unregSnap.size,
-        admissions: admSnap.size,
+        total: Number(json.total || 0),
+        registered: Number(json.registered || 0),
+        unregistered: Number(json.unregistered || 0),
+        admissions: Number(json.admissions || 0),
       });
     } catch { /* ignore */ }
   }, []);
@@ -383,7 +364,7 @@ export default function WhatsAppLogsPage() {
               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <select
                 value={actionFilter}
-                onChange={(e) => { setActionFilter(e.target.value); setLastDoc(null); }}
+                onChange={(e) => { setActionFilter(e.target.value); setBotPage(1); }}
                 className="pl-10 pr-8 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer"
               >
                 <option value="">All Actions</option>
@@ -400,7 +381,7 @@ export default function WhatsAppLogsPage() {
               variant="outline"
               size="sm"
               className="h-[38px]"
-              onClick={() => { setSortDesc(!sortDesc); setLastDoc(null); }}
+              onClick={() => { setSortDesc(!sortDesc); setBotPage(1); }}
             >
               <ArrowDownUp className="h-4 w-4 mr-1" />
               {sortDesc ? "Newest First" : "Oldest First"}

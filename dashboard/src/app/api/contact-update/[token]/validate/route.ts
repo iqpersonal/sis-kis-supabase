@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /**
  * GET /api/contact-update/[token]/validate
@@ -12,37 +12,43 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const supabase = createServiceClient();
   try {
     const { token } = await params;
 
-    const tokenRef = adminDb.collection("contact_update_tokens").doc(token);
-    const tokenDoc = await tokenRef.get();
+    const { data: tokenDoc } = await supabase
+      .from("contact_update_tokens")
+      .select("*")
+      .eq("id", token)
+      .maybeSingle();
 
-    if (!tokenDoc.exists) {
+    if (!tokenDoc) {
       return NextResponse.json({ error: "invalid_token", message: "Invalid link" }, { status: 404 });
     }
 
-    const td = tokenDoc.data()!;
+    const td = tokenDoc as Record<string, unknown>;
 
     if (td.used) {
       return NextResponse.json({ error: "token_used", message: "This link has already been used" }, { status: 410 });
     }
 
     // Mark as verified
-    await tokenRef.update({ verified: true });
+    const { error: verifyErr } = await supabase
+      .from("contact_update_tokens")
+      .update({ verified: true })
+      .eq("id", token);
+    if (verifyErr) throw verifyErr;
 
     // Fetch family data
-    const famSnap = await adminDb
-      .collection("families")
-      .where("family_number", "==", td.family_number)
-      .limit(1)
-      .get();
+    const { data: family } = await supabase
+      .from("families")
+      .select("*")
+      .eq("family_number", String(td.family_number || ""))
+      .maybeSingle();
 
-    if (famSnap.empty) {
+    if (!family) {
       return NextResponse.json({ error: "family_not_found", message: "Family not found" }, { status: 404 });
     }
-
-    const family = famSnap.docs[0].data();
 
     const children = (family.children || []).map((c: Record<string, string>) => ({
       child_name: c.child_name || "",

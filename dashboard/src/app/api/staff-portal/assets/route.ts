@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 function extractToken(req: NextRequest): string | null {
   const h = req.headers.get("authorization");
@@ -7,56 +8,21 @@ function extractToken(req: NextRequest): string | null {
   return null;
 }
 
-/**
- * GET /api/staff-portal/assets
- * Returns IT assets assigned to the authenticated staff member
- */
 export async function GET(req: NextRequest) {
   const token = extractToken(req);
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let decoded;
-  try {
-    decoded = await adminAuth.verifyIdToken(token);
-  } catch {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
+  try { decoded = await adminAuth.verifyIdToken(token); } catch { return NextResponse.json({ error: "Invalid token" }, { status: 401 }); }
 
   const email = decoded.email || "";
+  const supabase = createServiceClient();
 
-  // Get staff number from email
-  const staffSnap = await adminDb
-    .collection("staff")
-    .where("E_Mail", "==", email.toLowerCase())
-    .limit(1)
-    .get();
+  const { data: staffRows } = await supabase.from("staff").select("Staff_Number, id").ilike("E_Mail", email).limit(1);
+  const staffRow = staffRows && staffRows.length > 0 ? staffRows[0] as Record<string,unknown> : null;
+  if (!staffRow) return NextResponse.json({ error: "Staff not found" }, { status: 404 });
 
-  let staffNumber: string | null = null;
-  if (!staffSnap.empty) {
-    staffNumber = staffSnap.docs[0].data().Staff_Number || staffSnap.docs[0].id;
-  } else {
-    const staffSnap2 = await adminDb
-      .collection("staff")
-      .where("E_Mail", "==", email)
-      .limit(1)
-      .get();
-    if (!staffSnap2.empty) {
-      staffNumber =
-        staffSnap2.docs[0].data().Staff_Number || staffSnap2.docs[0].id;
-    }
-  }
-
-  if (!staffNumber) {
-    return NextResponse.json({ error: "Staff not found" }, { status: 404 });
-  }
-
-  const snap = await adminDb
-    .collection("it_assets")
-    .where("assigned_to", "==", staffNumber)
-    .get();
-
-  const assets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  return NextResponse.json({ assets });
+  const staffNumber = String(staffRow.Staff_Number || staffRow.id || "");
+  const { data } = await supabase.from("it_assets").select("*").eq("assigned_to", staffNumber);
+  return NextResponse.json({ assets: data ?? [] });
 }

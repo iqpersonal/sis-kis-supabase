@@ -1,90 +1,73 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { getCached, setCache } from "@/lib/cache";
 import { CACHE_MEDIUM } from "@/lib/cache-headers";
 
 /**
- * Staff API
- *
  * GET /api/staff
- *   ?action=list         → all staff (active by default)
+ *   ?action=list         → active staff
  *   ?action=all          → all staff including terminated
  *   ?action=detail&id=X  → single staff member
  *   ?action=departments  → list departments
  *   ?action=stats        → staff KPIs
  */
-
 export async function GET(req: NextRequest) {
   const action = req.nextUrl.searchParams.get("action") || "list";
+  const supabase = createServiceClient();
 
   try {
-    // ── Active staff list ──
     if (action === "list") {
-      const snap = await adminDb
-        .collection("staff")
-        .where("is_active", "==", true)
-        .limit(5000)
-        .get();
-      const staff = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return NextResponse.json({ staff }, { headers: CACHE_MEDIUM });
+      const { data: staff } = await supabase
+        .from("staff")
+        .select("*")
+        .eq("is_active", true)
+        .limit(5000);
+      return NextResponse.json({ staff: staff ?? [] }, { headers: CACHE_MEDIUM });
     }
 
-    // ── All staff ──
     if (action === "all") {
-      const snap = await adminDb.collection("staff").limit(5000).get();
-      const staff = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return NextResponse.json({ staff }, { headers: CACHE_MEDIUM });
+      const { data: staff } = await supabase.from("staff").select("*").limit(5000);
+      return NextResponse.json({ staff: staff ?? [] }, { headers: CACHE_MEDIUM });
     }
 
-    // ── Single staff detail ──
     if (action === "detail") {
       const id = req.nextUrl.searchParams.get("id");
-      if (!id) {
-        return NextResponse.json({ error: "id required" }, { status: 400 });
-      }
-      const doc = await adminDb.collection("staff").doc(id).get();
-      if (!doc.exists) {
+      if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+      const [{ data: staffRow, error }, { data: assets }] = await Promise.all([
+        supabase.from("staff").select("*").eq("id", id).maybeSingle(),
+        supabase.from("it_assets").select("*").eq("assigned_to", id),
+      ]);
+
+      if (error || !staffRow) {
         return NextResponse.json({ error: "Staff not found" }, { status: 404 });
       }
 
-      // Also fetch assigned assets
-      const assetsSnap = await adminDb
-        .collection("it_assets")
-        .where("assigned_to", "==", id)
-        .get();
-      const assets = assetsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      return NextResponse.json({
-        staff: { id: doc.id, ...doc.data() },
-        assets,
-      }, { headers: CACHE_MEDIUM });
+      return NextResponse.json({ staff: staffRow, assets: assets ?? [] }, { headers: CACHE_MEDIUM });
     }
 
-    // ── Departments ──
     if (action === "departments") {
       const cached = getCached<object[]>("departments");
       if (cached) return NextResponse.json({ departments: cached }, { headers: CACHE_MEDIUM });
 
-      const snap = await adminDb.collection("departments").get();
-      const departments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setCache("departments", departments);
-      return NextResponse.json({ departments }, { headers: CACHE_MEDIUM });
+      const { data: departments } = await supabase.from("departments").select("*");
+      setCache("departments", departments ?? []);
+      return NextResponse.json({ departments: departments ?? [] }, { headers: CACHE_MEDIUM });
     }
 
-    // ── Stats ──
     if (action === "stats") {
-      const [activeSnap, allSnap, deptSnap] = await Promise.all([
-        adminDb.collection("staff").where("is_active", "==", true).count().get(),
-        adminDb.collection("staff").count().get(),
-        adminDb.collection("departments").count().get(),
+      const [{ count: activeCount }, { count: totalCount }, { count: deptCount }] = await Promise.all([
+        supabase.from("staff").select("*", { count: "exact", head: true }).eq("is_active", true),
+        supabase.from("staff").select("*", { count: "exact", head: true }),
+        supabase.from("departments").select("*", { count: "exact", head: true }),
       ]);
 
-      return NextResponse.json({
-        total: allSnap.data().count,
-        active: activeSnap.data().count,
-        terminated: allSnap.data().count - activeSnap.data().count,
-        departments: deptSnap.data().count,
-      }, { headers: CACHE_MEDIUM });
+      const total = totalCount ?? 0;
+      const active = activeCount ?? 0;
+      return NextResponse.json(
+        { total, active, terminated: total - active, departments: deptCount ?? 0 },
+        { headers: CACHE_MEDIUM }
+      );
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

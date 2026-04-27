@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
 
 /* ─── In-memory cache (shared across all hook instances) ─── */
 let classNameCache: Record<string, string> | null = null;
@@ -28,13 +26,13 @@ export function useClassNames() {
 
     (async () => {
       try {
-        const snap = await getDocs(collection(getDb(), "classes"));
+        const res = await fetch("/api/classes");
+        const json = await res.json();
         const map: Record<string, string> = {};
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          if (data.Class_Code) {
-            map[String(data.Class_Code)] =
-              data.E_Class_Desc || data.E_Class_Abbreviation || String(data.Class_Code);
+        (json.classes ?? []).forEach((d: Record<string, unknown>) => {
+          if (d.class_code || d.Class_Code) {
+            const code = String(d.class_code ?? d.Class_Code);
+            map[code] = String(d.e_class_desc ?? d.E_Class_Desc ?? d.e_class_abbreviation ?? d.E_Class_Abbreviation ?? code);
           }
         });
         classNameCache = map;

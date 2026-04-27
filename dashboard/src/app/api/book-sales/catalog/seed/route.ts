@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createServiceClient } from "@/lib/supabase-server";
 import { invalidateCache } from "@/lib/cache";
 import { verifySuperAdmin } from "@/lib/api-auth";
 
@@ -287,31 +286,29 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Write in batches of 500 (Firestore limit)
+    const supabase = createServiceClient();
+    const now = new Date().toISOString();
     const BATCH_SIZE = 500;
     let written = 0;
 
     for (let i = 0; i < DATA.length; i += BATCH_SIZE) {
-      const batch = adminDb.batch();
       const chunk = DATA.slice(i, i + BATCH_SIZE);
+      const rows = chunk.map(([grade, isbn, title, price]) => ({
+        id: crypto.randomUUID(),
+        title: title.trim(),
+        grade,
+        subject: deriveSubject(title),
+        price,
+        isbn: isbn.trim(),
+        year: YEAR,
+        is_active: true,
+        created_at: now,
+        updated_at: now,
+      }));
 
-      for (const [grade, isbn, title, price] of chunk) {
-        const ref = adminDb.collection("book_catalog").doc();
-        batch.set(ref, {
-          title: title.trim(),
-          grade,
-          subject: deriveSubject(title),
-          price,
-          isbn: isbn.trim(),
-          year: YEAR,
-          is_active: true,
-          created_at: FieldValue.serverTimestamp(),
-          updated_at: FieldValue.serverTimestamp(),
-        });
-        written++;
-      }
-
-      await batch.commit();
+      const { error } = await supabase.from("book_catalog").insert(rows);
+      if (error) throw error;
+      written += rows.length;
     }
 
     invalidateCache("book_catalog:");

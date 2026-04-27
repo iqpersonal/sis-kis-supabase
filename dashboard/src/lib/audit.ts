@@ -2,7 +2,7 @@
  * Audit Log — writes structured entries to the `audit_log` Firestore collection.
  * Call `logAudit()` from any server-side API route to record an action.
  */
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 export interface AuditEntry {
   /** Who performed the action (email or uid) */
@@ -27,8 +27,14 @@ export interface AuditEntry {
  */
 export async function logAudit(entry: AuditEntry): Promise<void> {
   try {
-    await adminDb.collection("audit_log").add({
-      ...entry,
+    const supabase = createServiceClient();
+    await supabase.from("audit_log").insert({
+      actor: entry.actor,
+      action: entry.action,
+      details: entry.details,
+      target_id: entry.targetId,
+      target_type: entry.targetType,
+      ip: entry.ip,
       timestamp: entry.timestamp || new Date().toISOString(),
     });
   } catch (err) {

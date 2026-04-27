@@ -1,40 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
 
 /**
- * Book Sales — Receipt PDF API  (independent bookshop receipt)
- *
- * GET /api/book-sales/receipt?id=xxx
- *   Returns an A5-portrait PDF receipt for the given sale ID.
+ * Book Sales - Receipt PDF API
  */
 
 const PRIMARY: [number, number, number] = [41, 98, 150];
 const HEADER_BG: [number, number, number] = [41, 98, 150];
 
-// ── GET ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const saleId = req.nextUrl.searchParams.get("id");
-  if (!saleId) {
-    return NextResponse.json({ error: "id is required" }, { status: 400 });
-  }
+  if (!saleId) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
   try {
-    const doc = await adminDb.collection("book_sales").doc(saleId).get();
-    if (!doc.exists) {
-      return NextResponse.json({ error: "Sale not found" }, { status: 404 });
-    }
+    const supabase = createServiceClient();
+    const { data: sale, error } = await supabase.from("book_sales").select("*").eq("id", saleId).maybeSingle();
+    if (error) throw error;
+    if (!sale) return NextResponse.json({ error: "Sale not found" }, { status: 404 });
 
-    const sale = doc.data()!;
     const origin = process.env.NEXT_PUBLIC_BASE_URL || "https://sis-kis.web.app";
-    const pdfBuffer = await generateReceiptPDF(sale, saleId, origin);
+    const pdfBuffer = await generateReceiptPDF(sale as Record<string, unknown>, saleId, origin);
 
     return new Response(pdfBuffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="receipt_${sale.receipt_number || saleId}.pdf"`,
+        "Content-Disposition": `inline; filename="receipt_${(sale as Record<string, unknown>).receipt_number || saleId}.pdf"`,
         "Cache-Control": "public, max-age=3600, s-maxage=3600",
       },
     });
@@ -44,15 +37,12 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── PDF Generation ─────────────────────────────────────────────
 async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string, origin: string): Promise<ArrayBuffer> {
-  // A5 portrait: 148 × 210 mm
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a5" });
   const pageW = 148;
   const margin = 10;
   let y = 12;
 
-  // ── Header / Branding ──
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(16);
   pdf.setTextColor(...PRIMARY);
@@ -67,27 +57,20 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
   pdf.text("Book Sales Receipt", pageW / 2, y, { align: "center" });
   y += 6;
 
-  // Divider
   pdf.setDrawColor(200, 200, 200);
   pdf.setLineWidth(0.3);
   pdf.line(margin, y, pageW - margin, y);
   y += 5;
 
-  // ── Receipt Info ──
   pdf.setFontSize(9);
   pdf.setTextColor(50, 50, 50);
   pdf.setFont("helvetica", "bold");
 
   const receiptNumber = (sale.receipt_number as string) || saleId;
   const createdAt = sale.created_at;
-  let dateStr = "";
-  if (createdAt && typeof createdAt === "object" && "toDate" in (createdAt as Record<string, unknown>)) {
-    dateStr = (createdAt as { toDate: () => Date }).toDate().toLocaleDateString("en-GB");
-  } else if (typeof createdAt === "string") {
-    dateStr = new Date(createdAt).toLocaleDateString("en-GB");
-  } else {
-    dateStr = new Date().toLocaleDateString("en-GB");
-  }
+  const dateStr = typeof createdAt === "string"
+    ? new Date(createdAt).toLocaleDateString("en-GB")
+    : new Date().toLocaleDateString("en-GB");
 
   pdf.text(`Receipt #: ${receiptNumber}`, margin, y);
   pdf.text(`Date: ${dateStr}`, pageW - margin, y, { align: "right" });
@@ -106,7 +89,6 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
   }
   y += 2;
 
-  // ── Items Table ──
   const items = Array.isArray(sale.items) ? sale.items : [];
   const tableBody = items.map((item: { title?: string; price?: number }, i: number) => [
     String(i + 1),
@@ -142,7 +124,6 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
 
   y = (pdf as unknown as Record<string, Record<string, number>>).lastAutoTable.finalY + 4;
 
-  // ── Totals with VAT ──
   pdf.setDrawColor(200, 200, 200);
   pdf.line(margin, y, pageW - margin, y);
   y += 5;
@@ -177,7 +158,6 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
   pdf.text(`Payment: ${(sale.payment_method as string) || "Cash"}`, margin, y);
   y += 6;
 
-  // ── Voided stamp ──
   if (sale.status === "voided") {
     pdf.setFontSize(24);
     pdf.setTextColor(220, 50, 50);
@@ -192,7 +172,6 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
     }
   }
 
-  // ── QR Code ──
   const receiptUrl = `${origin}/receipt/${saleId}`;
   try {
     const qrDataUrl = await QRCode.toDataURL(receiptUrl, {
@@ -202,7 +181,6 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
     });
     const qrSize = 40;
     const qrX = pageW / 2 - qrSize / 2;
-    // White background box behind QR for scan contrast
     pdf.setFillColor(255, 255, 255);
     pdf.rect(qrX - 2, y, qrSize + 4, qrSize + 4, "F");
     pdf.addImage(qrDataUrl, "PNG", qrX, y + 2, qrSize, qrSize);
@@ -212,11 +190,9 @@ async function generateReceiptPDF(sale: Record<string, unknown>, saleId: string,
     pdf.text("Scan to view receipt on your device", pageW / 2, y, { align: "center" });
     y += 5;
   } catch {
-    // QR generation failed — skip silently
     y += 2;
   }
 
-  // ── Footer ──
   pdf.setDrawColor(200, 200, 200);
   pdf.line(margin, y, pageW - margin, y);
   y += 4;

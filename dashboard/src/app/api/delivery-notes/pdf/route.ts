@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
@@ -19,15 +19,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const doc = await adminDb.collection("delivery_notes").doc(id).get();
-    if (!doc.exists) {
+    const supabase = createServiceClient();
+    const { data: doc } = await supabase.from("delivery_notes").select("*").eq("id", id).maybeSingle();
+    if (!doc) {
       return NextResponse.json(
         { error: "Delivery note not found" },
         { status: 404 }
       );
     }
 
-    const dn = doc.data()!;
+    const dn = doc as Record<string, unknown>;
     const origin =
       process.env.NEXT_PUBLIC_BASE_URL || "https://sis-kis.web.app";
     const pdfBuffer = await generatePDF(dn, id, origin);

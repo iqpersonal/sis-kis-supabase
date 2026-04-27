@@ -40,11 +40,12 @@ async function fetchStoreData(apiBase: string): Promise<StoreData> {
     fetch(`${apiBase}?action=requests&limit=5000`),
   ]);
 
-  const items: StoreItem[] = itemsRes.ok ? ((await itemsRes.json()).rows ?? await itemsRes.json()) : [];
-  const txnBody = txnRes.ok ? await txnRes.json() : { rows: [] };
-  const transactions: StoreTransaction[] = txnBody.rows ?? txnBody;
-  const reqBody = reqRes.ok ? await reqRes.json() : { rows: [] };
-  const requests: StoreRequest[] = reqBody.rows ?? reqBody;
+  const itemsBody = itemsRes.ok ? await itemsRes.json() : {};
+  const items: StoreItem[] = itemsBody.items ?? itemsBody.rows ?? itemsBody;
+  const txnBody = txnRes.ok ? await txnRes.json() : { transactions: [] };
+  const transactions: StoreTransaction[] = txnBody.transactions ?? txnBody.rows ?? [];
+  const reqBody = reqRes.ok ? await reqRes.json() : { requests: [] };
+  const requests: StoreRequest[] = reqBody.requests ?? reqBody.rows ?? [];
 
   return { items: Array.isArray(items) ? items : [], transactions, requests };
 }
@@ -59,6 +60,7 @@ const STOCK_BADGE = (qty: number, reorder: number) => {
 /* ─── Main Component ──────────────────────────────────────────── */
 export default function StoreReportsPage() {
   const { user, can } = useAuth();
+  const reportRef = useRef<HTMLDivElement>(null);
   const [store, setStore] = useState<StoreSelection>("both");
   const [tab, setTab] = useState<ReportTab>("overview");
   const [loading, setLoading] = useState(true);
@@ -176,7 +178,6 @@ export default function StoreReportsPage() {
 
   const storeDesc = store === "both" ? "General Store & IT Store" : store === "general" ? "General Store" : "IT Store";
   const tabLabel = reportTabs.find((rt) => rt.key === tab)?.label || tab;
-  const reportRef = useRef<HTMLDivElement>(null);
 
   /* ── Professional Print ── */
   function handlePrint() {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /**
  * POST /api/contact-update/[token]/verify-otp
@@ -15,6 +15,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const supabase = createServiceClient();
   try {
     const { token } = await params;
     const { otp } = await req.json();
@@ -23,14 +24,17 @@ export async function POST(
       return NextResponse.json({ error: "otp_required", message: "OTP is required" }, { status: 400 });
     }
 
-    const tokenRef = adminDb.collection("contact_update_tokens").doc(token);
-    const tokenDoc = await tokenRef.get();
+    const { data: tokenDoc } = await supabase
+      .from("contact_update_tokens")
+      .select("*")
+      .eq("id", token)
+      .maybeSingle();
 
-    if (!tokenDoc.exists) {
+    if (!tokenDoc) {
       return NextResponse.json({ error: "invalid_token", message: "Invalid link" }, { status: 404 });
     }
 
-    const td = tokenDoc.data()!;
+    const td = tokenDoc as Record<string, unknown>;
 
     if (td.used) {
       return NextResponse.json({ error: "token_used", message: "This link has already been used" }, { status: 410 });
@@ -54,7 +58,11 @@ export async function POST(
 
     if (!valid) {
       const attempts = (td.otp_attempts || 0) + 1;
-      await tokenRef.update({ otp_attempts: attempts });
+      const { error: attemptErr } = await supabase
+        .from("contact_update_tokens")
+        .update({ otp_attempts: attempts })
+        .eq("id", token);
+      if (attemptErr) throw attemptErr;
       const remaining = 3 - attempts;
       return NextResponse.json({
         error: "otp_invalid",
@@ -66,20 +74,22 @@ export async function POST(
     }
 
     // OTP correct — mark verified
-    await tokenRef.update({ verified: true, otp: null, otp_expires_at: null });
+    const { error: verifyErr } = await supabase
+      .from("contact_update_tokens")
+      .update({ verified: true, otp: null, otp_expires_at: null })
+      .eq("id", token);
+    if (verifyErr) throw verifyErr;
 
     // Fetch family data for the form
-    const famSnap = await adminDb
-      .collection("families")
-      .where("family_number", "==", td.family_number)
-      .limit(1)
-      .get();
+    const { data: family } = await supabase
+      .from("families")
+      .select("*")
+      .eq("family_number", String(td.family_number || ""))
+      .maybeSingle();
 
-    if (famSnap.empty) {
+    if (!family) {
       return NextResponse.json({ error: "family_not_found", message: "Family not found" }, { status: 404 });
     }
-
-    const family = famSnap.docs[0].data();
 
     // Build response with children and contact fields
     const children = (family.children || []).map((c: Record<string, string>) => ({

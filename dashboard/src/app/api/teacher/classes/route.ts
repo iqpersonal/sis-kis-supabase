@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { getCached, setCache } from "@/lib/cache";
 import { CACHE_PRIVATE } from "@/lib/cache-headers";
 
@@ -9,6 +9,7 @@ import { CACHE_PRIVATE } from "@/lib/cache-headers";
  * Falls back to name-matching if no explicit assignments exist.
  */
 export async function GET(req: NextRequest) {
+  const supabase = createServiceClient();
   const username = req.nextUrl.searchParams.get("username");
   const uid = req.nextUrl.searchParams.get("uid");
 
@@ -17,28 +18,32 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    let teacherData: FirebaseFirestore.DocumentData;
+    let teacherData: Record<string, unknown>;
 
     if (uid) {
-      // Direct lookup by doc ID (Firebase UID)
-      const teacherDoc = await adminDb.collection("admin_users").doc(uid).get();
-      if (!teacherDoc.exists) {
-        return NextResponse.json({ classes: [] });
-      }
-      teacherData = teacherDoc.data()!;
-    } else {
-      // Find teacher doc by username
-      const teacherSnap = await adminDb
-        .collection("admin_users")
-        .where("username", "==", username)
-        .where("role", "==", "teacher")
-        .limit(1)
-        .get();
+      const { data, error } = await supabase
+        .from("admin_users")
+        .select("*")
+        .eq("id", uid)
+        .single();
 
-      if (teacherSnap.empty) {
+      if (error || !data) {
         return NextResponse.json({ classes: [] });
       }
-      teacherData = teacherSnap.docs[0].data();
+      teacherData = data as Record<string, unknown>;
+    } else {
+      const { data, error } = await supabase
+        .from("admin_users")
+        .select("*")
+        .eq("username", username)
+        .eq("role", "teacher")
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        return NextResponse.json({ classes: [] });
+      }
+      teacherData = data as Record<string, unknown>;
     }
 
     interface ClassInfo {
@@ -62,27 +67,29 @@ export async function GET(req: NextRequest) {
         assigned.map(async (a: any) => {
           let studentCount = 0;
           try {
-            // Look up section doc to get Class_Code / Section_Code
+            // Look up section row to get Class_Code / Section_Code
             if (a.classId) {
-              const secDoc = await adminDb.collection("sections").doc(a.classId).get();
-              if (secDoc.exists) {
-                const sd = secDoc.data()!;
+              const { data: sd } = await supabase
+                .from("sections")
+                .select("Class_Code, Section_Code, class_code, section_code, Major_Code, major_code")
+                .eq("id", a.classId)
+                .maybeSingle();
+
+              if (sd) {
                 const classCode = String(sd.Class_Code || "");
                 const sectionCode = String(sd.Section_Code || "");
-                let query: FirebaseFirestore.Query = adminDb
-                  .collection("registrations")
-                  .where("Class_Code", "==", classCode)
-                  .where("Section_Code", "==", sectionCode);
-                if (sd.Major_Code) {
-                  query = query.where("Major_Code", "==", String(sd.Major_Code));
-                }
-                if (a.year) {
-                  query = query.where("Academic_Year", "==", a.year);
-                }
-                const regSnap = await query.get();
-                studentCount = regSnap.docs.filter(
-                  (d) => !d.data().Termination_Date
-                ).length;
+                let query = supabase
+                  .from("registrations")
+                  .select("termination_date, class_code, section_code, major_code, academic_year")
+                  .eq("class_code", classCode)
+                  .eq("section_code", sectionCode);
+
+                const majorCode = String(sd.Major_Code || sd.major_code || "");
+                if (majorCode) query = query.eq("major_code", majorCode);
+                if (a.year) query = query.eq("academic_year", a.year);
+
+                const { data: regs } = await query;
+                studentCount = (regs || []).filter((r: Record<string, unknown>) => !r.termination_date).length;
               }
             }
           } catch (e) {
@@ -107,17 +114,20 @@ export async function GET(req: NextRequest) {
     // Build class-code → grade-name lookup (cached)
     let classMap = getCached<Map<string, string>>("class_code_map");
     if (!classMap) {
-      const classesSnap = await adminDb.collection("classes").get();
+      const { data: classRows } = await supabase
+        .from("classes")
+        .select("Class_Code, class_code, E_Class_Desc, e_class_desc, E_Class_Abbreviation, e_class_abbreviation");
+
       classMap = new Map<string, string>();
-      for (const doc of classesSnap.docs) {
-        const d = doc.data();
-        classMap.set(d.Class_Code, d.E_Class_Desc || d.E_Class_Abbreviation || "");
+      for (const d of classRows || []) {
+        const item = d as Record<string, unknown>;
+        const code = String(item.Class_Code || item.class_code || "");
+        const label = String(item.E_Class_Desc || item.e_class_desc || item.E_Class_Abbreviation || item.e_class_abbreviation || "");
+        if (code) classMap.set(code, label);
       }
       setCache("class_code_map", classMap);
     }
 
-    // Get latest academic year sections
-    const sectionsSnap = await adminDb.collection("sections").get();
     const classes: ClassInfo[] = [];
 
     // No name matching possible without teacher field in sections

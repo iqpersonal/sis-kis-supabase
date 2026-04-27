@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { ROLES, type Role } from "@/lib/rbac";
 import { sendEmail } from "@/lib/email-service";
 import { bulkWelcomeEmail } from "@/lib/email-templates";
@@ -45,22 +45,37 @@ interface UploadResult {
 }
 
 async function verifyCallerIsSuperAdmin(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   const token = authHeader.slice(7);
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (snap.exists) return snap.data()?.role === "super_admin";
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser(token);
+    if (authErr || !user) return false;
+
+    const { data: caller } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (caller) return caller.role === "super_admin";
 
     // First-admin bootstrap: if NO admin_users docs exist at all,
     // treat the current authenticated user as super_admin and create their doc.
-    const allAdmins = await adminDb.collection("admin_users").limit(1).get();
-    if (allAdmins.empty) {
-      await adminDb.collection("admin_users").doc(decoded.uid).set({
-        email: decoded.email || "",
+    const { data: anyAdmin } = await supabase
+      .from("admin_users")
+      .select("id")
+      .limit(1)
+      .maybeSingle();
+    if (!anyAdmin) {
+      await supabase.from("admin_users").upsert({
+        id: user.id,
+        email: user.email || "",
         role: "super_admin",
-        createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
       });
       return true;
     }
@@ -72,6 +87,7 @@ async function verifyCallerIsSuperAdmin(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const supabase = createServiceClient();
   const authorized = await verifyCallerIsSuperAdmin(req);
   if (!authorized) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -92,6 +108,19 @@ export async function POST(req: NextRequest) {
   }
 
   const results: UploadResult[] = [];
+
+  const { data: usersList, error: usersErr } = await supabase.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+  if (usersErr) {
+    return NextResponse.json({ error: `Failed to read auth users: ${usersErr.message}` }, { status: 500 });
+  }
+  const existingByEmail = new Map(
+    (usersList.users || [])
+      .filter((u) => !!u.email)
+      .map((u) => [String(u.email).toLowerCase(), u.id])
+  );
 
   for (const row of rows) {
     const email = (row.PRIMARYEMAIL || "").trim().toLowerCase();
@@ -122,22 +151,25 @@ export async function POST(req: NextRequest) {
       let action: "created" | "updated" = "created";
 
       // Try to get existing user first
-      try {
-        const existingUser = await adminAuth.getUserByEmail(email);
-        uid = existingUser.uid;
-        // Update display name if changed
-        await adminAuth.updateUser(uid, {
-          displayName: fullName,
+      const existingUid = existingByEmail.get(email);
+      if (existingUid) {
+        uid = existingUid;
+        const { error: updateErr } = await supabase.auth.admin.updateUserById(uid, {
+          user_metadata: { display_name: fullName },
         });
+        if (updateErr) throw updateErr;
         action = "updated";
-      } catch {
+      } else {
         // User doesn't exist → create new
-        const newUser = await adminAuth.createUser({
+        const { data: created, error: createErr } = await supabase.auth.admin.createUser({
           email,
           password,
-          displayName: fullName,
+          user_metadata: { display_name: fullName },
+          email_confirm: true,
         });
-        uid = newUser.uid;
+        if (createErr || !created.user) throw createErr || new Error("Failed to create auth user");
+        uid = created.user.id;
+        existingByEmail.set(email, uid);
       }
 
       // Upsert admin_users doc
@@ -161,25 +193,30 @@ export async function POST(req: NextRequest) {
       if (classIds) {
         const ids = classIds.split(";").map((s) => s.trim()).filter(Boolean);
         if (ids.length > 0) {
-          const refs = ids.map((id) => adminDb.collection("classes").doc(id));
-          const classDocs = await adminDb.getAll(...refs);
-          const assigned = classDocs
-            .filter((d) => d.exists)
-            .map((d) => {
-              const cd = d.data()!;
+          const { data: classRows } = await supabase
+            .from("classes")
+            .select("id, class_name, grade, section, subject_name, subject, year, academic_year")
+            .in("id", ids);
+
+          const assigned = (classRows || [])
+            .map((cd: Record<string, unknown>) => {
               return {
-                classId: d.id,
+                classId: String(cd.id || ""),
                 className: cd.class_name || cd.grade || "",
                 section: cd.section || "",
                 subject: cd.subject_name || cd.subject || "",
                 year: cd.year || cd.academic_year || "",
               };
-            });
+            })
+            .filter((a) => !!a.classId);
           userDoc.assigned_classes = assigned;
         }
       }
 
-      await adminDb.collection("admin_users").doc(uid).set(userDoc, { merge: true });
+      const { error: upsertErr } = await supabase
+        .from("admin_users")
+        .upsert({ id: uid, ...userDoc }, { onConflict: "id" });
+      if (upsertErr) throw upsertErr;
 
       // Send welcome email for newly created accounts (skip for teachers)
       if (action === "created" && role !== "teacher") {
@@ -189,7 +226,7 @@ export async function POST(req: NextRequest) {
           password,
           role,
         });
-        sendEmail({ to: email, subject: tpl.subject, html: tpl.html }).catch((e) =>
+        sendEmail({ to: email, subject: tpl.subject, html: tpl.html, text: tpl.text }).catch((e) =>
           console.error(`Welcome email failed for ${email}:`, e)
         );
       }

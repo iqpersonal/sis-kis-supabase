@@ -24,6 +24,7 @@ export const ROLES = {
   it_admin: "IT Admin",
   admissions: "Admissions",
   librarian: "Librarian",
+  doa: "Director of Administration",
 } as const;
 
 export type Role = keyof typeof ROLES;
@@ -324,6 +325,52 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "dashboard.view",
     "library.view",
   ],
+
+  // Director of Administration: broad access, no finance module
+  doa: [
+    "dashboard.view",
+    "students.view",
+    "students.edit",
+    "students.profile",
+    "academics.view",
+    "subjects.view",
+    "assessments.view",
+    "assessments.manage",
+    "progress.view",
+    "terms.view",
+    "subject_trends.view",
+    "honor_roll.view",
+    "at_risk.view",
+    "attendance.view",
+    "attendance.edit",
+    "documents.view",
+    "library.view",
+    "notifications.view",
+    "analytics.view",
+    "year_comparison.view",
+    "ai_insights.view",
+    "transfers.view",
+    "transfers.edit",
+    "bulk_export.view",
+    "transcript_settings.view",
+    "staff.view",
+    "certificates.print",
+    "quizzes.view",
+    "quizzes.manage",
+    "kg.view",
+    "kg.manage",
+    "announcements.manage",
+    "admissions.view",
+    "admissions.manage",
+    "admissions.reports",
+    "exam_seating.manage",
+    "inventory.view",
+    "general_store.view",
+    "it_store.view",
+    "store_reports.view",
+    "fixed_assets.view",
+    "admin.audit_log",
+  ],
 };
 
 /* ── Route → Permission mapping ──────────────────────────────────  */
@@ -395,7 +442,7 @@ export const MAJOR_SCOPED_ROLES: readonly Role[] = [
 ] as const;
 
 export function hasPermission(role: Role, permission: Permission, secondaryRoles?: Role[]): boolean {
-  if (ROLE_PERMISSIONS[role].includes(permission)) return true;
+  if (ROLE_PERMISSIONS[role]?.includes(permission)) return true;
   if (secondaryRoles?.length) {
     return secondaryRoles.some((sr) => ROLE_PERMISSIONS[sr]?.includes(permission));
   }

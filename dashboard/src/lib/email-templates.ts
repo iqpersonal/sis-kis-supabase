@@ -50,6 +50,24 @@ interface WelcomeEmailData {
 export function teacherWelcomeEmail(data: WelcomeEmailData) {
   const subject = "Welcome to KIS — Your SIS Account is Ready";
 
+  const text = [
+    `Welcome, ${data.displayName}!`,
+    ``,
+    `An account has been created for you on the Khaled International Schools Student Information System.`,
+    ``,
+    `Email: ${data.email}`,
+    `Role:  ${data.role}`,
+    ``,
+    `Please set your password by clicking the link below. This link expires in 24 hours.`,
+    ``,
+    data.resetLink,
+    ``,
+    `After setting your password, sign in at ${DASHBOARD_URL}`,
+    `If you did not expect this email, please contact the school administration.`,
+    ``,
+    `Khaled International Schools — Riyadh, Saudi Arabia`,
+  ].join("\n");
+
   const html = baseLayout(`
     <h2 style="margin:0 0 16px;color:${KIS_BLUE};font-size:20px;">Welcome, ${data.displayName}!</h2>
     <p style="margin:0 0 12px;color:#374151;font-size:15px;line-height:1.6;">
@@ -77,7 +95,7 @@ export function teacherWelcomeEmail(data: WelcomeEmailData) {
     </p>
   `);
 
-  return { subject, html };
+  return { subject, html, text };
 }
 
 // ── Bulk Upload Welcome Email (password provided) ──────────────
@@ -91,6 +109,22 @@ interface BulkWelcomeData {
 
 export function bulkWelcomeEmail(data: BulkWelcomeData) {
   const subject = "Welcome to KIS — Your SIS Account Credentials";
+
+  const text = [
+    `Welcome, ${data.displayName}!`,
+    ``,
+    `An account has been created for you on the Khaled International Schools Student Information System.`,
+    ``,
+    `Email:    ${data.email}`,
+    `Password: ${data.password}`,
+    `Role:     ${data.role}`,
+    ``,
+    `Sign in at: ${DASHBOARD_URL}`,
+    `We recommend changing your password after your first sign-in.`,
+    `If you did not expect this email, please contact the school administration.`,
+    ``,
+    `Khaled International Schools — Riyadh, Saudi Arabia`,
+  ].join("\n");
 
   const html = baseLayout(`
     <h2 style="margin:0 0 16px;color:${KIS_BLUE};font-size:20px;">Welcome, ${data.displayName}!</h2>
@@ -118,7 +152,7 @@ export function bulkWelcomeEmail(data: BulkWelcomeData) {
     </p>
   `);
 
-  return { subject, html };
+  return { subject, html, text };
 }
 
 // ── Password Reset Email ───────────────────────────────────────

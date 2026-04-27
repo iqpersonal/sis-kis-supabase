@@ -1,5 +1,5 @@
 /**
- * Auth context – wraps the app and exposes the current Firebase user + RBAC role.
+ * Auth context – wraps the app and exposes the current Supabase user + RBAC role.
  */
 "use client";
 
@@ -12,17 +12,10 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  type User,
-} from "firebase/auth";
-import { doc, getDoc, collection, query, where, limit, getDocs } from "firebase/firestore";
-import { getFirebaseAuth, getDb } from "@/lib/firebase";
+import type { User } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 import type { Role, Permission } from "@/lib/rbac";
-import { ROLE_PERMISSIONS, hasPermission, MAJOR_SCOPED_ROLES } from "@/lib/rbac";
+import { ROLE_PERMISSIONS, hasPermission } from "@/lib/rbac";
 
 interface AuthCtx {
   user: User | null;
@@ -65,74 +58,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let requestId = 0; // Track latest auth event to ignore stale responses
-    const authInstance = getFirebaseAuth();
-    const unsub = onAuthStateChanged(authInstance, async (u) => {
-      const thisRequest = ++requestId;
-      setUser(u);
-      if (u) {
-        // Refresh __session cookie with a fresh Firebase ID token
-        try {
-          const idToken = await u.getIdToken();
-          document.cookie = `__session=${idToken}; path=/; max-age=${3600}; SameSite=Lax; Secure`;
-        } catch { /* ignore — cookie will be refreshed next auth event */ }
+    const supabase = getSupabase();
 
-        try {
-          const snap = await getDoc(doc(getDb(), "admin_users", u.uid));
-          if (thisRequest !== requestId) return; // Stale — user changed since this request started
-          if (snap.exists()) {
-            const data = snap.data();
-            setRole(data.role as Role);
-            setSecondaryRoles(
-              Array.isArray(data.secondary_roles)
-                ? (data.secondary_roles as string[]).filter((r) => r in ROLE_PERMISSIONS) as Role[]
-                : []
-            );
-            setAssignedMajor(data.assigned_major ?? null);
-            setSupervisedClasses(Array.isArray(data.supervised_classes) ? data.supervised_classes : []);
-            setSupervisedSubjects(Array.isArray(data.supervised_subjects) ? data.supervised_subjects : []);
-            setTeaches(!!data.teaches);
+    // Load initial session synchronously then subscribe to changes
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleSession(session?.user ?? null, session?.access_token ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        handleSession(session?.user ?? null, session?.access_token ?? null);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSession(u: User | null, accessToken: string | null) {
+    setUser(u);
+
+    if (u && accessToken) {
+      // Refresh __session cookie with the Supabase access token
+      document.cookie = `__session=${accessToken}; path=/; max-age=${3600}; SameSite=Lax; Secure`;
+
+      try {
+        const supabase = getSupabase();
+        let { data } = await supabase
+          .from("admin_users")
+          .select("role, roles, secondary_roles, assigned_major, supervised_classes, supervised_subjects, teaches")
+          .eq("id", u.id)
+          .single();
+
+        // Fallback: look up by email when user id is not in admin_users
+        if (!data && u.email) {
+          const res = await supabase
+            .from("admin_users")
+            .select("role, roles, secondary_roles, assigned_major, supervised_classes, supervised_subjects, teaches")
+            .eq("email", u.email.trim().toLowerCase())
+            .single();
+          data = res.data;
+        }
+
+        if (data) {
+          const PRIORITY: Role[] = [
+            "super_admin", "school_admin", "doa", "it_admin", "it_manager",
+            "academic_director", "head_of_section", "subject_coordinator", "academic",
+            "finance", "accounts", "registrar", "teacher", "librarian",
+            "store_clerk", "bookshop", "admissions", "viewer",
+          ];
+          let resolvedRole: Role;
+          if (Array.isArray(data.roles) && data.roles.length > 0) {
+            resolvedRole = (data.roles as Role[]).sort(
+              (a, b) => PRIORITY.indexOf(a) - PRIORITY.indexOf(b)
+            )[0] ?? "viewer";
           } else {
-            // Fallback for accounts where admin_users doc ID differs from Firebase UID.
-            // Try resolving by email before defaulting to viewer.
-            let emailResolved = false;
-            const normalizedEmail = (u.email || "").trim().toLowerCase();
-            if (normalizedEmail) {
-              const byEmailQ = query(
-                collection(getDb(), "admin_users"),
-                where("email", "==", normalizedEmail),
-                limit(1)
-              );
-              const byEmail = await getDocs(byEmailQ);
-              if (thisRequest !== requestId) return;
-              if (!byEmail.empty) {
-                const data = byEmail.docs[0].data();
-                setRole(data.role as Role);
-                setSecondaryRoles(
-                  Array.isArray(data.secondary_roles)
-                    ? (data.secondary_roles as string[]).filter((r) => r in ROLE_PERMISSIONS) as Role[]
-                    : []
-                );
-                setAssignedMajor(data.assigned_major ?? null);
-                setSupervisedClasses(Array.isArray(data.supervised_classes) ? data.supervised_classes : []);
-                setSupervisedSubjects(Array.isArray(data.supervised_subjects) ? data.supervised_subjects : []);
-                setTeaches(!!data.teaches);
-                emailResolved = true;
-              }
-            }
-
-            if (!emailResolved) {
-              // No admin_users mapping found → default to viewer (safe).
-              setRole("viewer");
-              setSecondaryRoles([]);
-              setAssignedMajor(null);
-              setSupervisedClasses([]);
-              setSupervisedSubjects([]);
-              setTeaches(false);
-            }
+            resolvedRole = (data.role ?? "viewer") as Role;
           }
-        } catch {
-          if (thisRequest !== requestId) return;
+          setRole(resolvedRole);
+          setSecondaryRoles(
+            Array.isArray(data.secondary_roles)
+              ? (data.secondary_roles as string[]).filter((r) => r in ROLE_PERMISSIONS) as Role[]
+              : []
+          );
+          setAssignedMajor(data.assigned_major ?? null);
+          setSupervisedClasses(Array.isArray(data.supervised_classes) ? data.supervised_classes : []);
+          setSupervisedSubjects(Array.isArray(data.supervised_subjects) ? data.supervised_subjects : []);
+          setTeaches(!!data.teaches);
+        } else {
           setRole("viewer");
           setSecondaryRoles([]);
           setAssignedMajor(null);
@@ -140,29 +133,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSupervisedSubjects([]);
           setTeaches(false);
         }
-      } else {
-        setRole(null);
+      } catch {
+        setRole("viewer");
         setSecondaryRoles([]);
         setAssignedMajor(null);
         setSupervisedClasses([]);
         setSupervisedSubjects([]);
         setTeaches(false);
       }
-      if (thisRequest === requestId) setLoading(false);
-    });
-    return unsub;
-  }, []);
+    } else {
+      // Clear cookie on sign-out
+      document.cookie = "__session=; path=/; max-age=0";
+      setRole(null);
+      setSecondaryRoles([]);
+      setAssignedMajor(null);
+      setSupervisedClasses([]);
+      setSupervisedSubjects([]);
+      setTeaches(false);
+    }
+    setLoading(false);
+  }
 
   const signIn = useCallback(async (email: string, password: string) => {
-    await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+    const { error } = await getSupabase().auth.signInWithPassword({ email, password });
+    if (error) throw error;
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+    const { error } = await getSupabase().auth.signUp({ email, password });
+    if (error) throw error;
   }, []);
 
   const signOut = useCallback(async () => {
-    await firebaseSignOut(getFirebaseAuth());
+    await getSupabase().auth.signOut();
   }, []);
 
   const can = useCallback((permission: Permission): boolean => {

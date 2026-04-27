@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /* ── Auth helper: Super Admin + Admin + Principal ────────────── */
 async function verifyAccess(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   try {
-    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (!snap.exists) return false;
-    const role = snap.data()?.role;
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(authHeader.slice(7));
+    if (error || !user) return false;
+
+    const { data: profile } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!profile) return false;
+    const role = profile.role;
     return ["super_admin", "school_admin", "academic_director"].includes(role);
   } catch {
     return false;
@@ -24,15 +34,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const year = req.nextUrl.searchParams.get("year");
     const examType = req.nextUrl.searchParams.get("examType");
 
-    let query: FirebaseFirestore.Query = adminDb.collection(COLLECTION);
-    if (year) query = query.where("academicYear", "==", year);
-    if (examType) query = query.where("examType", "==", examType);
+    let query = supabase.from(COLLECTION).select("*").limit(2000);
+    if (year) query = query.eq("academicYear", year);
+    if (examType) query = query.eq("examType", examType);
 
-    const snap = await query.orderBy("createdAt", "desc").get();
-    const schedules = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const schedules = (data || [])
+      .map((row: Record<string, unknown>) => ({ id: row.id, ...row }))
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     return NextResponse.json({ schedules });
   } catch (err) {
     console.error("[exam-schedule] GET error:", err);
@@ -46,6 +61,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { academicYear, examType, gradeGroup, days } = body as {
       academicYear: string;
@@ -78,7 +94,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const doc = await adminDb.collection(COLLECTION).add({
+    const id = crypto.randomUUID();
+    const { error } = await supabase.from(COLLECTION).insert({
+      id,
       academicYear,
       examType,
       gradeGroup,
@@ -87,8 +105,9 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    if (error) throw error;
 
-    return NextResponse.json({ id: doc.id, ok: true });
+    return NextResponse.json({ id, ok: true });
   } catch (err) {
     console.error("[exam-schedule] POST error:", err);
     return NextResponse.json({ error: "Failed to create schedule" }, { status: 500 });
@@ -101,6 +120,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { id, ...updates } = body as {
       id: string;
@@ -120,7 +140,8 @@ export async function PUT(req: NextRequest) {
     if (updates.days) update.days = updates.days;
     if (updates.status) update.status = updates.status;
 
-    await adminDb.collection(COLLECTION).doc(id).update(update);
+    const { error } = await supabase.from(COLLECTION).update(update).eq("id", id);
+    if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[exam-schedule] PUT error:", err);
@@ -134,10 +155,12 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const { id } = (await req.json()) as { id: string };
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    await adminDb.collection(COLLECTION).doc(id).delete();
+    const { error } = await supabase.from(COLLECTION).delete().eq("id", id);
+    if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[exam-schedule] DELETE error:", err);

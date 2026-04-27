@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { verifyPassword, hashPassword } from "@/lib/password";
 
 const CORS_HEADERS = {
@@ -8,22 +8,18 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-/** Handle CORS preflight for mobile app requests */
 export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
 /**
  * POST /api/parent-auth
- * Verify parent credentials against the families collection.
+ * Verify parent credentials against the families table.
  * Returns family data + children on success.
  */
 export async function POST(req: NextRequest) {
   try {
-    const { username, password } = (await req.json()) as {
-      username: string;
-      password: string;
-    };
+    const { username, password } = (await req.json()) as { username: string; password: string };
 
     if (!username || !password) {
       return NextResponse.json(
@@ -32,48 +28,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Look up family number from username index
-    const indexDoc = await adminDb
-      .collection("parent_config")
-      .doc("username_index")
-      .get();
+    const supabase = createServiceClient();
 
-    if (!indexDoc.exists) {
-      return NextResponse.json(
-        { error: "System not configured. Please contact administrator." },
-        { status: 500, headers: CORS_HEADERS }
-      );
-    }
+    const { data: famRows } = await supabase
+      .from("families")
+      .select("*")
+      .eq("username", username.trim())
+      .limit(1);
 
-    const index = indexDoc.data()?.index as Record<string, string>;
-    const familyNumber = index[username.trim()];
-
-    if (!familyNumber) {
+    if (!famRows || famRows.length === 0) {
       return NextResponse.json(
         { error: "Invalid username or password" },
         { status: 401, headers: CORS_HEADERS }
       );
     }
 
-    // Get family document
-    const familyDoc = await adminDb
-      .collection("families")
-      .doc(familyNumber)
-      .get();
+    const family = famRows[0] as Record<string, unknown>;
 
-    if (!familyDoc.exists) {
-      return NextResponse.json(
-        { error: "Invalid username or password" },
-        { status: 401, headers: CORS_HEADERS }
-      );
-    }
-
-    const family = familyDoc.data()!;
-
-    // Verify password (supports bcrypt hash and legacy plaintext)
     const { match, needsUpgrade } = await verifyPassword(
       password.trim(),
-      family.password || ""
+      String(family.password_hash || "")
     );
     if (!match) {
       return NextResponse.json(
@@ -82,19 +56,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Upgrade plaintext → bcrypt on successful login
     if (needsUpgrade) {
       const hashed = await hashPassword(password.trim());
-      await adminDb.collection("families").doc(familyNumber).update({ password: hashed });
+      await supabase.from("families").update({ password_hash: hashed }).eq("id", family.id);
     }
 
-    // Return family data (without password)
-    const { password: _pw, ...safeFamily } = family;
+    // Return family data (without password_hash)
+    const { password_hash: _pw, ...safeFamily } = family;
 
-    return NextResponse.json({
-      success: true,
-      family: safeFamily,
-    }, { headers: CORS_HEADERS });
+    return NextResponse.json({ success: true, family: safeFamily }, { headers: CORS_HEADERS });
   } catch (err) {
     console.error("Parent auth error:", err);
     return NextResponse.json(

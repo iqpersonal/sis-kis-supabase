@@ -26,8 +26,6 @@ import {
   Eye,
   CheckSquare,
 } from "lucide-react";
-import { getDb } from "@/lib/firebase";
-import { collection, query, where, getDocs } from "firebase/firestore";
 import { printDiplomas, type DiplomaStudent } from "@/components/diploma-template";
 
 type DocRecord = Record<string, unknown> & { id: string };
@@ -68,17 +66,22 @@ export default function DiplomasPage() {
     (async () => {
       try {
         const yearStr = selectedYear || "25-26";
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", yearStr),
-          where("Major_Code", "==", majorFilter)
-        );
-        const snap = await getDocs(q);
+        const params = new URLSearchParams({
+          action: "collection",
+          table: "sections",
+          year: yearStr,
+          yearField: "Academic_Year",
+          limit: "2000",
+        });
+        const res = await fetch(`/api/sis-data?${params.toString()}`, { cache: "no-store" });
+        const json = await res.json();
         if (cancelled) return;
+        const docs = (json.data || []) as Record<string, unknown>[];
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
+        docs.forEach((data) => {
           const classCode = String(data.Class_Code || "");
+          const majorCode = String(data.Major_Code || "");
+          if (majorCode !== majorFilter) return;
           if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
             items.push({
               classCode,
@@ -144,8 +147,9 @@ export default function DiplomasPage() {
   /* ── Load registrations + students ── */
   const { data: allRegs, loading: regsLoading } =
     useFilteredCollection<DocRecord>("registrations", selectedYear);
+  // 3000 cap — well above any realistic enrollment; names are needed for diploma print
   const { data: students, loading: studentsLoading } =
-    useCollection<DocRecord>("students", 10000);
+    useCollection<DocRecord>("students", 3000);
 
   const studentMap = useMemo(() => {
     const map = new Map<string, DocRecord>();

@@ -20,10 +20,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { UserCheck, Plus, CheckCircle, XCircle, Clock, Search, AlertCircle } from "lucide-react";
-import { getDb } from "@/lib/firebase";
-import {
-  collection, getDocs, doc, setDoc, updateDoc,
-} from "firebase/firestore";
 
 interface Enquiry {
   ref_number: string;
@@ -77,19 +73,13 @@ export default function InterviewsPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const db = getDb();
-      const [intSnap, enqSnap] = await Promise.all([
-        getDocs(collection(db, "admission_interviews")),
-        getDocs(collection(db, "admission_enquiries")),
-      ]);
-      const intList: Interview[] = [];
-      intSnap.forEach((d) => intList.push({ id: d.id, ...d.data() } as Interview));
+      const res = await fetch("/api/admissions/interviews?includeEnquiries=1", { cache: "no-store" });
+      const json = await res.json();
+      const intList = (json.interviews || []) as Interview[];
       intList.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setInterviews(intList);
 
-      const enqList: Enquiry[] = [];
-      enqSnap.forEach((d) => enqList.push(d.data() as Enquiry));
-      setEnquiries(enqList);
+      setEnquiries((json.enquiries || []) as Enquiry[]);
     } catch (err) {
       console.error("Failed to load interviews:", err);
     } finally {
@@ -112,7 +102,6 @@ export default function InterviewsPage() {
 
     setSaving(true);
     try {
-      const db = getDb();
       const ref = schedForm.enquiry_ref.toUpperCase().replace(/\s/g, "");
       const intId = `${ref}_${student.name.replace(/\s+/g, "_")}_int_${Date.now()}`;
       const now = new Date().toISOString();
@@ -130,13 +119,11 @@ export default function InterviewsPage() {
         updated_at: now,
       };
 
-      await setDoc(doc(db, "admission_interviews", intId), record);
-      if (enq && enq.status === "test_done") {
-        await updateDoc(doc(db, "admission_enquiries", enq.ref_number), {
-          status: "interview_scheduled",
-          updated_at: now,
-        });
-      }
+      await fetch("/api/admissions/interviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...record, id: intId }),
+      });
 
       setInterviews((prev) => [{ id: intId, ...record }, ...prev]);
       setShowScheduleDialog(false);
@@ -152,21 +139,19 @@ export default function InterviewsPage() {
     if (!editInterview) return;
     setSaving(true);
     try {
-      const db = getDb();
       const now = new Date().toISOString();
-      await updateDoc(doc(db, "admission_interviews", editInterview.id), {
-        outcome: editInterview.outcome,
-        notes: editInterview.notes,
-        interviewer: editInterview.interviewer,
-        updated_at: now,
-      });
-
-      if (editInterview.outcome !== "pending") {
-        await updateDoc(doc(db, "admission_enquiries", editInterview.enquiry_ref), {
-          status: "interview_done",
+      await fetch("/api/admissions/interviews", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editInterview.id,
+          enquiry_ref: editInterview.enquiry_ref,
+          outcome: editInterview.outcome,
+          notes: editInterview.notes,
+          interviewer: editInterview.interviewer,
           updated_at: now,
-        });
-      }
+        }),
+      });
 
       setInterviews((prev) =>
         prev.map((i) => i.id === editInterview.id ? { ...editInterview, updated_at: now } : i)

@@ -28,7 +28,7 @@ import {
   HelpCircle, ClipboardList, Users, BarChart3, Loader2,
   Trophy, Clock, FileText, Plus, XCircle,
 } from "lucide-react";
-import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, query, where, doc, getDoc, limit } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 
 /* ─── Types ──────────────────────────────────────────────────── */
@@ -172,7 +172,7 @@ export default function QuizzesPage() {
 
       // Fetch assignments — teacher sees only their own
       const aSnap = await getDocs(
-        query(collection(fireDb, "quiz_assignments"), where("year", "==", targetYear))
+        query(collection(fireDb, "quiz_assignments"), where("year", "==", targetYear), limit(500))
       );
       let aData = aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Assignment));
       if (isTeacher && userEmail) {
@@ -185,14 +185,14 @@ export default function QuizzesPage() {
 
       // Fetch question count — teacher sees only questions they created
       const qQuery = isTeacher && userEmail
-        ? query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), where("created_by", "==", userEmail))
-        : query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear));
+        ? query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), where("created_by", "==", userEmail), limit(2000))
+        : query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), limit(2000));
       const qSnap = await getDocs(qQuery);
       setQuestions(qSnap.size);
 
       // Fetch results — teacher sees only results from their assignments
       const rSnap = await getDocs(
-        query(collection(fireDb, "quiz_results"), where("year", "==", targetYear))
+        query(collection(fireDb, "quiz_results"), where("year", "==", targetYear), limit(2000))
       );
       let rData = rSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Result));
       if (isTeacher && userEmail) {
@@ -225,6 +225,7 @@ export default function QuizzesPage() {
             collection(fireDb, "quiz_questions"),
             where("year", "==", selectedYear || "25-26"),
             where("class_code", "==", createBandCode),
+            limit(500),
           )
         );
         setAvailableQuestions(

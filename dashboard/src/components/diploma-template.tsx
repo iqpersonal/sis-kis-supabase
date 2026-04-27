@@ -13,8 +13,6 @@
  */
 
 import QRCode from "qrcode";
-import { getDb } from "@/lib/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export interface DiplomaStudent {
   fullName: string;
@@ -36,27 +34,24 @@ export async function printDiplomas(
   /* ---- Generate verification codes & QR data URLs ---- */
   const siteUrl = window.location.origin;
   const verifyBase = "https://sis-kis.web.app";
-  const db = getDb();
   const qrMap = new Map<string, string>(); // studentNumber → QR dataUrl
 
   try {
+    const verifications: { id: string; studentName: string; studentNumber: string; ceremonyDate: string }[] = [];
     await Promise.all(
       students.map(async (s) => {
         const code = crypto.randomUUID();
         const verifyUrl = `${verifyBase}/verify/${code}`;
-        const dataUrl = await QRCode.toDataURL(verifyUrl, {
-          width: 150,
-          margin: 1,
-        });
+        const dataUrl = await QRCode.toDataURL(verifyUrl, { width: 150, margin: 1 });
         qrMap.set(s.studentNumber, dataUrl);
-        await setDoc(doc(db, "diploma_verifications", code), {
-          studentName: s.fullName,
-          studentNumber: s.studentNumber,
-          ceremonyDate,
-          issuedAt: serverTimestamp(),
-        });
+        verifications.push({ id: code, studentName: s.fullName, studentNumber: s.studentNumber, ceremonyDate });
       })
     );
+    await fetch("/api/diploma-verifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verifications }),
+    });
   } catch (err) {
     console.error("QR/verification error:", err);
     alert("Error generating verification codes: " + (err instanceof Error ? err.message : String(err)));

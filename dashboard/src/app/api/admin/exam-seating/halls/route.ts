@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /* ── Auth helper: Super Admin + Admin + Principal ────────────── */
 async function verifyAccess(req: NextRequest) {
+  const supabase = createServiceClient();
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   try {
-    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (!snap.exists) return false;
-    const role = snap.data()?.role;
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(authHeader.slice(7));
+    if (error || !user) return false;
+
+    const { data: profile } = await supabase
+      .from("admin_users")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!profile) return false;
+    const role = profile.role;
     return ["super_admin", "school_admin", "academic_director"].includes(role);
   } catch {
     return false;
@@ -24,8 +34,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
-    const snap = await adminDb.collection(COLLECTION).orderBy("hallName").get();
-    const halls = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from(COLLECTION)
+      .select("*")
+      .limit(2000);
+    if (error) throw error;
+
+    const halls = (data || [])
+      .map((row: Record<string, unknown>) => ({
+        ...row,
+        id: String(row.id || ""),
+        hallName: String(row.hallName || row.hall_name || ""),
+      }))
+      .sort((a, b) => String(a.hallName).localeCompare(String(b.hallName)));
     return NextResponse.json({ halls });
   } catch (err) {
     console.error("[exam-halls] GET error:", err);
@@ -39,6 +61,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { hallName, campus, rows, columns } = body as {
       hallName: string;
@@ -54,7 +77,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "rows/columns must be 1-50" }, { status: 400 });
     }
 
-    const doc = await adminDb.collection(COLLECTION).add({
+    const id = crypto.randomUUID();
+    const { error } = await supabase.from(COLLECTION).insert({
+      id,
       hallName: String(hallName).trim(),
       campus: String(campus),
       rows: Number(rows),
@@ -63,8 +88,9 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    if (error) throw error;
 
-    return NextResponse.json({ id: doc.id, ok: true });
+    return NextResponse.json({ id, ok: true });
   } catch (err) {
     console.error("[exam-halls] POST error:", err);
     return NextResponse.json({ error: "Failed to create hall" }, { status: 500 });
@@ -77,6 +103,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { id, hallName, campus, rows, columns, isActive } = body as {
       id: string;
@@ -102,7 +129,8 @@ export async function PUT(req: NextRequest) {
     }
     if (isActive !== undefined) update.isActive = Boolean(isActive);
 
-    await adminDb.collection(COLLECTION).doc(id).update(update);
+    const { error } = await supabase.from(COLLECTION).update(update).eq("id", id);
+    if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[exam-halls] PUT error:", err);
@@ -116,10 +144,12 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   try {
+    const supabase = createServiceClient();
     const { id } = (await req.json()) as { id: string };
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-    await adminDb.collection(COLLECTION).doc(id).delete();
+    const { error } = await supabase.from(COLLECTION).delete().eq("id", id);
+    if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[exam-halls] DELETE error:", err);

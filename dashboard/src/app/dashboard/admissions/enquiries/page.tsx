@@ -25,10 +25,6 @@ import { Label } from "@/components/ui/label";
 import {
   Search, Plus, Phone, Mail, Download, MessageSquare, CalendarDays, Clock, MapPin, User, Loader2, CheckCircle2, XCircle,
 } from "lucide-react";
-import { getDb, getFirebaseAuth } from "@/lib/firebase";
-import {
-  collection, getDocs, doc, updateDoc, setDoc, addDoc,
-} from "firebase/firestore";
 
 /* ── Status flow ── */
 const STATUSES = [
@@ -120,10 +116,9 @@ export default function AllEnquiriesPage() {
 
   const fetchEnquiries = useCallback(async () => {
     try {
-      const db = getDb();
-      const snap = await getDocs(collection(db, "admission_enquiries"));
-      const all: Enquiry[] = [];
-      snap.forEach((d) => all.push(d.data() as Enquiry));
+      const res = await fetch("/api/admissions/enquiries?limit=1000", { cache: "no-store" });
+      const json = await res.json();
+      const all = (json.enquiries || []) as Enquiry[];
       all.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setEnquiries(all);
     } catch (err) {
@@ -179,10 +174,10 @@ export default function AllEnquiriesPage() {
     }
 
     try {
-      const db = getDb();
-      await updateDoc(doc(db, "admission_enquiries", ref), {
-        status: newStatus,
-        updated_at: new Date().toISOString(),
+      await fetch("/api/admissions/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref_number: ref, status: newStatus }),
       });
       setEnquiries((prev) =>
         prev.map((e) => e.ref_number === ref ? { ...e, status: newStatus, updated_at: new Date().toISOString() } : e)
@@ -205,12 +200,11 @@ export default function AllEnquiriesPage() {
     const now = new Date().toISOString();
 
     try {
-      const db = getDb();
-
       // 1. Update enquiry status
-      await updateDoc(doc(db, "admission_enquiries", schedEnquiry.ref_number), {
-        status: newStatus,
-        updated_at: now,
+      await fetch("/api/admissions/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref_number: schedEnquiry.ref_number, status: newStatus }),
       });
       setEnquiries((prev) =>
         prev.map((e) =>
@@ -223,67 +217,64 @@ export default function AllEnquiriesPage() {
       // 2. Create record in admission_tests or admission_interviews
       if (schedType === "test") {
         const testId = `${schedEnquiry.ref_number}_${studentName.replace(/\s+/g, "_")}_${Date.now()}`;
-        await setDoc(doc(db, "admission_tests", testId), {
-          enquiry_ref: schedEnquiry.ref_number,
-          parent_name: schedEnquiry.parent_name,
-          student_name: studentName,
-          desired_grade: studentGrade,
-          test_date: schedForm.date,
-          time: schedForm.time,
-          place: schedForm.place,
-          staff: schedForm.staff,
-          math_score: null,
-          english_score: null,
-          arabic_score: null,
-          result: "pending",
-          notes: "",
-          created_at: now,
-          updated_at: now,
+        await fetch("/api/admissions/tests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: testId,
+            enquiry_ref: schedEnquiry.ref_number,
+            parent_name: schedEnquiry.parent_name,
+            student_name: studentName,
+            desired_grade: studentGrade,
+            test_date: schedForm.date,
+            time: schedForm.time,
+            place: schedForm.place,
+            staff: schedForm.staff,
+          }),
         });
       } else {
-        await addDoc(collection(db, "admission_interviews"), {
-          ref_number: schedEnquiry.ref_number,
-          parent_name: schedEnquiry.parent_name,
-          student_name: studentName,
-          student_grade: studentGrade,
-          date: schedForm.date,
-          time: schedForm.time,
-          place: schedForm.place,
-          staff: schedForm.staff,
-          status: "scheduled",
-          created_at: now,
+        const intId = `${schedEnquiry.ref_number}_${studentName.replace(/\s+/g, "_")}_int_${Date.now()}`;
+        await fetch("/api/admissions/interviews", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: intId,
+            enquiry_ref: schedEnquiry.ref_number,
+            parent_name: schedEnquiry.parent_name,
+            student_name: studentName,
+            desired_grade: studentGrade,
+            interview_date: schedForm.date,
+            interview_time: schedForm.time,
+            place: schedForm.place,
+            interviewer: schedForm.staff,
+          }),
         });
       }
 
       // 3. Send email + WhatsApp via API
       let notifyResult = { ok: true, email: { sent: false }, whatsapp: { sent: false } };
       try {
-        const user = getFirebaseAuth().currentUser;
-        const token = user ? await user.getIdToken() : null;
-        if (token) {
-          const res = await fetch("/api/admissions/notify", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              type: schedType,
-              parent_name: schedEnquiry.parent_name,
-              phone: schedEnquiry.phone,
-              email: schedEnquiry.email,
-              ref_number: schedEnquiry.ref_number,
-              student_name: studentName,
-              student_grade: studentGrade,
-              date: schedForm.date,
-              time: schedForm.time,
-              place: schedForm.place,
-              staff: schedForm.staff,
-              source: schedEnquiry.source || "whatsapp",
-            }),
-          });
-          notifyResult = await res.json();
-        }
+        const res = await fetch("/api/admissions/notify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: schedType,
+            parent_name: schedEnquiry.parent_name,
+            phone: schedEnquiry.phone,
+            email: schedEnquiry.email,
+            ref_number: schedEnquiry.ref_number,
+            student_name: studentName,
+            student_grade: studentGrade,
+            date: schedForm.date,
+            time: schedForm.time,
+            place: schedForm.place,
+            staff: schedForm.staff,
+            source: schedEnquiry.source || "whatsapp",
+          }),
+        });
+        notifyResult = await res.json();
       } catch (notifyErr) {
         console.error("Notification send error:", notifyErr);
       }
@@ -310,12 +301,11 @@ export default function AllEnquiriesPage() {
     const newStatus = notifyType === "contacted" ? "contacted" : "offer_sent";
 
     try {
-      const db = getDb();
-
       // 1. Update enquiry status
-      await updateDoc(doc(db, "admission_enquiries", notifyEnquiry.ref_number), {
-        status: newStatus,
-        updated_at: now,
+      await fetch("/api/admissions/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref_number: notifyEnquiry.ref_number, status: newStatus }),
       });
       setEnquiries((prev) =>
         prev.map((e) =>
@@ -328,26 +318,21 @@ export default function AllEnquiriesPage() {
       // 2. Send notification via API
       let result = { ok: true, email: { sent: false }, whatsapp: { sent: false } };
       try {
-        const user = getFirebaseAuth().currentUser;
-        const token = user ? await user.getIdToken() : null;
-        if (token) {
-          const res = await fetch("/api/admissions/notify", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              type: notifyType,
-              parent_name: notifyEnquiry.parent_name,
-              phone: notifyEnquiry.phone,
-              email: notifyEnquiry.email,
-              ref_number: notifyEnquiry.ref_number,
-              source: notifyEnquiry.source || "whatsapp",
-            }),
-          });
-          result = await res.json();
-        }
+        const res = await fetch("/api/admissions/notify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: notifyType,
+            parent_name: notifyEnquiry.parent_name,
+            phone: notifyEnquiry.phone,
+            email: notifyEnquiry.email,
+            ref_number: notifyEnquiry.ref_number,
+            source: notifyEnquiry.source || "whatsapp",
+          }),
+        });
+        result = await res.json();
       } catch (notifyErr) {
         console.error("Notification send error:", notifyErr);
       }
@@ -369,10 +354,10 @@ export default function AllEnquiriesPage() {
   async function saveNotes(ref: string) {
     setSaving(true);
     try {
-      const db = getDb();
-      await updateDoc(doc(db, "admission_enquiries", ref), {
-        notes: noteText,
-        updated_at: new Date().toISOString(),
+      await fetch("/api/admissions/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref_number: ref, notes: noteText }),
       });
       setEnquiries((prev) =>
         prev.map((e) => e.ref_number === ref ? { ...e, notes: noteText } : e)
@@ -390,33 +375,21 @@ export default function AllEnquiriesPage() {
     if (!form.parent_name || !form.email || !form.phone) return;
     setSaving(true);
     try {
-      const db = getDb();
-      // Generate ref number
-      const snap = await getDocs(collection(db, "admission_enquiries"));
-      let maxNum = 1000;
-      snap.forEach((d) => {
-        const ref = d.data().ref_number as string;
-        const num = parseInt(ref.replace("ADM-", ""), 10);
-        if (num > maxNum) maxNum = num;
+      const res = await fetch("/api/admissions/enquiries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parent_name: form.parent_name,
+          phone: form.phone,
+          email: form.email,
+          students: form.students,
+          source: "manual",
+        }),
       });
-      const refNumber = `ADM-${maxNum + 1}`;
-      const now = new Date().toISOString();
-
-      const newEnquiry: Enquiry = {
-        ref_number: refNumber,
-        parent_name: form.parent_name,
-        phone: form.phone,
-        email: form.email,
-        students: form.students.filter((s) => s.name.trim()),
-        student_count: form.students.filter((s) => s.name.trim()).length,
-        status: "new",
-        source: "manual",
-        created_at: now,
-        updated_at: now,
-      };
-
-      await setDoc(doc(db, "admission_enquiries", refNumber), newEnquiry);
-      setEnquiries((prev) => [newEnquiry, ...prev]);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Create enquiry failed");
+      const newEnquiry = json.enquiry as Enquiry;
+      setEnquiries((prev) => (newEnquiry ? [newEnquiry, ...prev] : prev));
       setShowAddDialog(false);
       setForm({
         parent_name: "", phone: "", email: "",

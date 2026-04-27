@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { CACHE_SHORT } from "@/lib/cache-headers";
 import { compareAlphabeticalNames } from "@/lib/name-sort";
+import { getCached, setCache } from "@/lib/cache";
 
 /**
- * Book Sales — Reports API
+ * Book Sales - Reports API
  *
  * GET /api/book-sales/reports
  *   ?type=daily&date=2026-04-01&year=25-26
@@ -13,8 +14,6 @@ import { compareAlphabeticalNames } from "@/lib/name-sort";
  *   ?type=inventory&year=25-26
  *   ?type=unpaid&year=25-26
  */
-
-const COLLECTION = "book_sales";
 
 interface SaleDoc {
   id: string;
@@ -33,18 +32,14 @@ interface SaleDoc {
   status?: string;
   sold_by?: string;
   year?: string;
-  created_at?: unknown;
+  created_at?: string;
 }
+
+interface BrowseEntry { sn: string; name: string; fam: string; class?: string }
 
 function extractDate(ts: unknown): Date | null {
   if (!ts) return null;
-  if (typeof ts === "object" && ts !== null && "toDate" in (ts as Record<string, unknown>)) {
-    return (ts as { toDate: () => Date }).toDate();
-  }
   if (typeof ts === "string") return new Date(ts);
-  if (typeof ts === "object" && ts !== null && "_seconds" in (ts as Record<string, unknown>)) {
-    return new Date((ts as { _seconds: number })._seconds * 1000);
-  }
   return null;
 }
 
@@ -52,11 +47,12 @@ function dateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function fetchSales(year: string): Promise<SaleDoc[]> {
-  let query: FirebaseFirestore.Query = adminDb.collection(COLLECTION);
-  if (year) query = query.where("year", "==", year);
-  const snap = await query.limit(5000).get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as SaleDoc));
+async function fetchSales(supabase: ReturnType<typeof createServiceClient>, year: string): Promise<SaleDoc[]> {
+  let query = supabase.from("book_sales").select("*").limit(5000);
+  if (year) query = query.eq("year", year);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []) as SaleDoc[];
 }
 
 function filterByDateRange(sales: SaleDoc[], from: string, to: string): SaleDoc[] {
@@ -68,7 +64,6 @@ function filterByDateRange(sales: SaleDoc[], from: string, to: string): SaleDoc[
   });
 }
 
-// ── Build summary from a list of sales ──
 function buildSummary(sales: SaleDoc[]) {
   let totalTransactions = 0;
   let totalRevenue = 0;
@@ -97,26 +92,22 @@ function buildSummary(sales: SaleDoc[]) {
 
     if (s.student_number) soldStudents.add(s.student_number);
 
-    // By payment method
     const method = s.payment_method || "unknown";
     if (!byPaymentMethod[method]) byPaymentMethod[method] = { count: 0, revenue: 0 };
     byPaymentMethod[method].count++;
     byPaymentMethod[method].revenue += paid;
 
-    // By grade
     const grade = s.grade || "Unknown";
     if (!byGrade[grade]) byGrade[grade] = { count: 0, revenue: 0, students: new Set() };
     byGrade[grade].count++;
     byGrade[grade].revenue += paid;
     if (s.student_number) byGrade[grade].students.add(s.student_number);
 
-    // By school
     const school = s.school || "Unknown";
     if (!bySchool[school]) bySchool[school] = { count: 0, revenue: 0 };
     bySchool[school].count++;
     bySchool[school].revenue += paid;
 
-    // By book
     for (const item of s.items || []) {
       const key = item.book_id || item.title;
       if (!byBook[key]) byBook[key] = { title: item.title, count: 0, revenue: 0 };
@@ -124,7 +115,6 @@ function buildSummary(sales: SaleDoc[]) {
       byBook[key].revenue += item.price || 0;
     }
 
-    // By date
     const d = extractDate(s.created_at);
     if (d) {
       const ds = dateStr(d);
@@ -135,7 +125,6 @@ function buildSummary(sales: SaleDoc[]) {
     }
   }
 
-  // Serialize grade students sets to counts
   const byGradeSerialized: Record<string, { count: number; revenue: number; unique_students: number }> = {};
   for (const [g, v] of Object.entries(byGrade)) {
     byGradeSerialized[g] = { count: v.count, revenue: v.revenue, unique_students: v.students.size };
@@ -162,8 +151,10 @@ export async function GET(req: NextRequest) {
     const sp = req.nextUrl.searchParams;
     const type = sp.get("type") || "daily";
     const year = sp.get("year") || "";
+    const supabase = createServiceClient();
+    const SCHOOL_MAP: Record<string, string> = { "0021-01": "Boys", "0021-02": "Girls" };
 
-    const allSales = await fetchSales(year);
+    const allSales = await fetchSales(supabase, year);
 
     // ── Daily report ──
     if (type === "daily") {
@@ -171,7 +162,6 @@ export async function GET(req: NextRequest) {
       const daySales = filterByDateRange(allSales, date, date);
       const summary = buildSummary(daySales);
 
-      // Include individual transactions for the daily table
       const transactions = daySales
         .filter((s) => s.status !== "voided")
         .map((s) => ({
@@ -211,15 +201,20 @@ export async function GET(req: NextRequest) {
     if (type === "grade") {
       const summary = buildSummary(allSales.filter((s) => s.status !== "voided"));
 
-      // Also get total enrolled students from browse index for comparison
       let enrolledByGrade: Record<string, number> = {};
       try {
-        const browseDoc = await adminDb.collection("parent_config").doc(`browse_${year}`).get();
-        if (browseDoc.exists) {
-          const buckets = (browseDoc.data()?.buckets ?? {}) as Record<string, unknown[]>;
+        const cacheKey = `book_browse_idx_${year}`;
+        let buckets = getCached<Record<string, BrowseEntry[]>>(cacheKey);
+        if (!buckets) {
+          const { data } = await supabase.from("parent_config").select("buckets").eq("id", `browse_${year}`).maybeSingle();
+          if (data?.buckets) {
+            buckets = data.buckets as Record<string, BrowseEntry[]>;
+            setCache(cacheKey, buckets, 30 * 60 * 1000);
+          }
+        }
+        if (buckets) {
           for (const [, entries] of Object.entries(buckets)) {
-            const list = entries as { class?: string }[];
-            for (const e of list) {
+            for (const e of entries as { class?: string }[]) {
               const g = e.class || "Unknown";
               enrolledByGrade[g] = (enrolledByGrade[g] || 0) + 1;
             }
@@ -234,16 +229,15 @@ export async function GET(req: NextRequest) {
     if (type === "inventory") {
       const summary = buildSummary(allSales.filter((s) => s.status !== "voided"));
 
-      // Get book catalog for reference (total available titles)
-      const catalogSnap = await adminDb.collection("book_catalog")
-        .where("year", "==", year)
-        .select("title", "grade", "price", "is_active")
-        .get();
-      const catalog = catalogSnap.docs.map((d) => ({
-        id: d.id,
-        ...d.data() as { title: string; grade: string; price: number; is_active: boolean },
-        sold: summary.by_book[d.id]?.count || 0,
-        revenue: summary.by_book[d.id]?.revenue || 0,
+      const { data: catalogData } = await supabase
+        .from("book_catalog")
+        .select("id, title, grade, price, is_active")
+        .eq("year", year);
+
+      const catalog = (catalogData || []).map((row) => ({
+        ...row,
+        sold: summary.by_book[row.id]?.count || 0,
+        revenue: summary.by_book[row.id]?.revenue || 0,
       }));
 
       return NextResponse.json({ summary, catalog }, { headers: CACHE_SHORT });
@@ -251,7 +245,6 @@ export async function GET(req: NextRequest) {
 
     // ── Unpaid families report ──
     if (type === "unpaid") {
-      // Get sold student numbers
       const soldStudents = new Set<string>();
       for (const s of allSales) {
         if (s.status !== "voided" && s.student_number) {
@@ -259,14 +252,17 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Get all enrolled students from browse index
-      const browseDoc = await adminDb.collection("parent_config").doc(`browse_${year}`).get();
-      if (!browseDoc.exists) {
-        return NextResponse.json({ unpaid: [], total_enrolled: 0, total_paid: soldStudents.size });
+      const cacheKey = `book_browse_idx_${year}`;
+      let buckets = getCached<Record<string, BrowseEntry[]>>(cacheKey);
+      if (!buckets) {
+        const { data } = await supabase.from("parent_config").select("buckets").eq("id", `browse_${year}`).maybeSingle();
+        if (!data?.buckets) {
+          return NextResponse.json({ unpaid: [], total_enrolled: 0, total_paid: soldStudents.size });
+        }
+        buckets = data.buckets as Record<string, BrowseEntry[]>;
+        setCache(cacheKey, buckets, 30 * 60 * 1000);
       }
 
-      const SCHOOL_MAP: Record<string, string> = { "0021-01": "Boys", "0021-02": "Girls" };
-      const buckets = (browseDoc.data()?.buckets ?? {}) as Record<string, { sn: string; name: string; fam: string; class?: string }[]>;
       const unpaid: { student_number: string; student_name: string; family_number: string; grade: string; school: string }[] = [];
       let totalEnrolled = 0;
 
@@ -274,7 +270,7 @@ export async function GET(req: NextRequest) {
         const parts = key.split("__");
         const schoolCode = parts[2] || "";
         const school = SCHOOL_MAP[schoolCode] || schoolCode;
-        for (const e of entries) {
+        for (const e of entries as { sn: string; name: string; fam: string; class?: string }[]) {
           totalEnrolled++;
           if (!soldStudents.has(e.sn)) {
             unpaid.push({

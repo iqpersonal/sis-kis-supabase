@@ -8,8 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Phone, Mail, GripVertical, User } from "lucide-react";
-import { getDb } from "@/lib/firebase";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 
 /* ── Kanban columns ── */
 const COLUMNS = [
@@ -58,10 +56,9 @@ export default function PipelinePage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const db = getDb();
-      const snap = await getDocs(collection(db, "admission_enquiries"));
-      const all: Enquiry[] = [];
-      snap.forEach((d) => all.push(d.data() as Enquiry));
+      const res = await fetch("/api/admissions/enquiries?limit=1000", { cache: "no-store" });
+      const json = await res.json();
+      const all = (json.enquiries || []) as Enquiry[];
       all.sort((a, b) => b.created_at.localeCompare(a.created_at));
       setEnquiries(all);
     } catch (err) {
@@ -106,10 +103,10 @@ export default function PipelinePage() {
     );
 
     try {
-      const db = getDb();
-      await updateDoc(doc(db, "admission_enquiries", refNumber), {
-        status: newStatus,
-        updated_at: new Date().toISOString(),
+      await fetch("/api/admissions/enquiries", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref_number: refNumber, status: newStatus }),
       });
     } catch (err) {
       console.error("Failed to update status:", err);

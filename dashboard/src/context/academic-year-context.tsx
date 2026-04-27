@@ -9,13 +9,6 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
-import {
-  collection,
-  getDocs,
-  query,
-  limit,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
 import { useAuth } from "@/context/auth-context";
 
 /* ── Session-level cache for academic years ── */
@@ -102,44 +95,15 @@ export function AcademicYearProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const db = getDb();
-
-        // 1) Try the dedicated academic_years collection first
-        const aySnap = await getDocs(collection(db, "academic_years"));
-        if (aySnap.size > 0) {
-          const docs = aySnap.docs.map((d) => d.data());
-          const codes = docs
-            .map((d) => String(d.Academic_Year ?? ""))
-            .filter(Boolean);
-          const unique = [...new Set(codes)].sort().reverse();
-          setYears(unique);
-
-          // Default to the year marked Current_Year, or newest
-          const currentDoc = docs.find((d) => d.Current_Year === true);
-          const defaultYear = currentDoc
-            ? String(currentDoc.Academic_Year)
-            : unique[0] ?? null;
-          setActiveYear(defaultYear);
-          setSelectedYearInternal(defaultYear);
-          ayCache = { years: unique, defaultYear, ts: Date.now() };
-          setLoading(false);
-          return;
-        }
-
-        // 2) Fallback: scan a smaller sample of registrations for distinct Academic_Year values
-        const regSnap = await getDocs(
-          query(collection(db, "registrations"), limit(500))
-        );
-        const yearSet = new Set<string>();
-        regSnap.docs.forEach((d) => {
-          const y = d.data().Academic_Year;
-          if (y) yearSet.add(String(y));
-        });
-        const sorted = [...yearSet].sort().reverse(); // newest first
-        setYears(sorted);
-        setActiveYear(sorted[0] ?? null);
-        setSelectedYearInternal(sorted[0] ?? null);
-        ayCache = { years: sorted, defaultYear: sorted[0] ?? null, ts: Date.now() };
+        const res = await fetch("/api/academic-years");
+        const json = await res.json();
+        // API returns { years: string[] } sorted ascending
+        const unique: string[] = [...(json.years ?? [])].sort().reverse();
+        setYears(unique);
+        const defaultYear = unique[0] ?? null;
+        setActiveYear(defaultYear);
+        setSelectedYearInternal(defaultYear);
+        ayCache = { years: unique, defaultYear, ts: Date.now() };
       } catch (err) {
         console.error("Failed to discover academic years:", err);
       } finally {

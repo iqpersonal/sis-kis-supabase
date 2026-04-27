@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { CACHE_SHORT } from "@/lib/cache-headers";
 import { compareAlphabeticalNames } from "@/lib/name-sort";
 
@@ -18,6 +18,7 @@ import { compareAlphabeticalNames } from "@/lib/name-sort";
 
 // ── GET ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  const supabase = createServiceClient();
   const { searchParams } = req.nextUrl;
   const studentNumber = searchParams.get("studentNumber");
 
@@ -27,29 +28,28 @@ export async function GET(req: NextRequest) {
       const sn = studentNumber.trim();
 
       // 1. Get records from our attendance collection
-      const snap = await adminDb
-        .collection("daily_attendance")
-        .where("student_number", "==", sn)
-        .orderBy("date", "desc")
-        .limit(200)
-        .get();
+      const { data: recordsData } = await supabase
+        .from("daily_attendance")
+        .select("*")
+        .eq("student_number", sn)
+        .order("date", { ascending: false })
+        .limit(200);
 
-      const records = snap.docs.map((d) => ({
+      const records = (recordsData || []).map((d: Record<string, unknown>) => ({
         id: d.id,
-        ...d.data(),
+        ...d,
       }));
 
       // 2. Also get legacy absence records from the mirrored student_absence collection
-      const legacySnap = await adminDb
-        .collection("student_absence")
-        .where("Student_Number", "==", sn)
-        .limit(500)
-        .get();
+      const { data: absenceRows } = await supabase
+        .from("student_absence")
+        .select("*")
+        .or(`student_number.eq.${sn},Student_Number.eq.${sn}`)
+        .limit(500);
 
-      const legacyRecords = legacySnap.docs.map((d) => {
-        const data = d.data();
+      const legacyRecords = (absenceRows || []).map((data: Record<string, unknown>) => {
         return {
-          id: d.id,
+          id: data.id,
           date: data.Absence_Date || "",
           status: "absent",
           days: data.No_of_Days || 1,
@@ -60,16 +60,15 @@ export async function GET(req: NextRequest) {
       });
 
       // 3. Legacy tardy
-      const tardySnap = await adminDb
-        .collection("student_tardy")
-        .where("Student_Number", "==", sn)
-        .limit(500)
-        .get();
+      const { data: tardyRows } = await supabase
+        .from("student_tardy")
+        .select("*")
+        .or(`student_number.eq.${sn},Student_Number.eq.${sn}`)
+        .limit(500);
 
-      const tardyRecords = tardySnap.docs.map((d) => {
-        const data = d.data();
+      const tardyRecords = (tardyRows || []).map((data: Record<string, unknown>) => {
         return {
-          id: d.id,
+          id: data.id,
           date: data.Tardy_date || data.Tardy_Date || "",
           status: "late",
           year: data.Academic_year || data.Academic_Year || "",
@@ -101,10 +100,11 @@ export async function GET(req: NextRequest) {
     const school = searchParams.get("school") || "";
 
     // Get students from browse index
-    const indexDoc = await adminDb
-      .collection("parent_config")
-      .doc(`browse_${year}`)
-      .get();
+    const { data: indexDoc } = await supabase
+      .from("parent_config")
+      .select("buckets")
+      .eq("id", `browse_${year}`)
+      .maybeSingle();
 
     const students: {
       student_number: string;
@@ -113,8 +113,8 @@ export async function GET(req: NextRequest) {
       section: string;
     }[] = [];
 
-    if (indexDoc.exists) {
-      const buckets = (indexDoc.data()?.buckets ?? {}) as Record<
+    if (indexDoc) {
+      const buckets = ((indexDoc as Record<string, unknown>)?.buckets ?? {}) as Record<
         string,
         { sn: string; name: string; gender: string; section: string }[]
       >;
@@ -140,24 +140,24 @@ export async function GET(req: NextRequest) {
     students.sort((a, b) => compareAlphabeticalNames(a.student_name, b.student_name));
 
     // Fetch existing attendance records for this date + class
-    const attendanceSnap = await adminDb
-      .collection("daily_attendance")
-      .where("date", "==", date)
-      .where("class_code", "==", classCode)
-      .get();
+    const { data: attendanceRows } = await supabase
+      .from("daily_attendance")
+      .select("*")
+      .eq("date", date)
+      .eq("class_code", classCode);
 
     const attendanceMap = new Map<
       string,
       { status: string; note: string; id: string }
     >();
-    for (const doc of attendanceSnap.docs) {
-      const d = doc.data();
+    for (const row of attendanceRows || []) {
+      const d = row as Record<string, unknown>;
       if (sectionCode && sectionCode !== "all" && d.section_code !== sectionCode)
         continue;
-      attendanceMap.set(d.student_number, {
-        status: d.status,
-        note: d.note || "",
-        id: doc.id,
+      attendanceMap.set(String(d.student_number || ""), {
+        status: String(d.status || "not-recorded"),
+        note: String(d.note || ""),
+        id: String(d.id || ""),
       });
     }
 
@@ -193,6 +193,7 @@ export async function GET(req: NextRequest) {
 
 // ── POST ───────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const supabase = createServiceClient();
   try {
     const body = await req.json();
     const {
@@ -223,36 +224,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const batch = adminDb.batch();
     const now = new Date().toISOString();
     let created = 0;
     let updated = 0;
 
     // Pre-fetch ALL existing records for this date + class in ONE query (eliminates N+1)
-    const existingSnap = await adminDb
-      .collection("daily_attendance")
-      .where("date", "==", date)
-      .where("class_code", "==", classCode)
-      .get();
-    const existingMap = new Map<string, FirebaseFirestore.DocumentReference>();
-    for (const doc of existingSnap.docs) {
-      existingMap.set(doc.data().student_number, doc.ref);
+    const { data: existingRows } = await supabase
+      .from("daily_attendance")
+      .select("id, student_number")
+      .eq("date", date)
+      .eq("class_code", classCode);
+    const existingMap = new Map<string, string>();
+    for (const row of existingRows || []) {
+      const r = row as Record<string, unknown>;
+      existingMap.set(String(r.student_number || ""), String(r.id || ""));
     }
 
+    const upserts: Record<string, unknown>[] = [];
+
     for (const r of records) {
-      const existingRef = existingMap.get(r.studentNumber);
-      if (existingRef) {
-        // Update existing
-        batch.update(existingRef, {
+      const existingId = existingMap.get(r.studentNumber);
+      if (existingId) {
+        upserts.push({
+          id: existingId,
+          date,
+          student_number: r.studentNumber,
+          class_code: classCode,
+          section_code: sectionCode || "",
+          year: year || "",
+          school: school || "",
           status: r.status,
           note: r.note || "",
           updated_at: now,
         });
         updated++;
       } else {
-        // Create new
-        const docRef = adminDb.collection("daily_attendance").doc();
-        batch.set(docRef, {
+        upserts.push({
           date,
           student_number: r.studentNumber,
           student_name: r.studentName || "",
@@ -269,7 +276,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await batch.commit();
+    if (upserts.length > 0) {
+      const { error: upsertErr } = await supabase.from("daily_attendance").upsert(upserts, {
+        onConflict: "id",
+      });
+      if (upsertErr) throw upsertErr;
+    }
 
     return NextResponse.json({
       success: true,

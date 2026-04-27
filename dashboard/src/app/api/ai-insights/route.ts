@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { verifyAdmin } from "@/lib/api-auth";
 
 /**
@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
   const auth = await verifyAdmin(req);
   if (!auth.ok) return auth.response;
 
+  const supabase = createServiceClient();
   try {
     const { year, school } = (await req.json()) as {
       year: string;
@@ -34,19 +35,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch summary data
-    const summaryDoc = await adminDb.collection("summaries").doc(year).get();
-    if (!summaryDoc.exists) {
+    const { data: summaryRow } = await supabase.from("summaries").select("*").eq("id", year).maybeSingle();
+    if (!summaryRow) {
       return NextResponse.json(
         { error: "No summary data for this year" },
         { status: 404 }
       );
     }
 
-    const summaryData = summaryDoc.data()!;
+    const summaryData = summaryRow as Record<string, unknown>;
     const schoolData =
       school === "all"
         ? summaryData.all
-        : summaryData[school] ?? summaryData.all;
+        : (summaryData[school] ?? summaryData.all);
 
     if (!schoolData) {
       return NextResponse.json(

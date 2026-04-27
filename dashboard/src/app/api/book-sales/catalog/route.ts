@@ -1,30 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { createServiceClient } from "@/lib/supabase-server";
 import { getCached, setCache, invalidateCache } from "@/lib/cache";
 import { CACHE_MEDIUM } from "@/lib/cache-headers";
 import { verifyAdmin } from "@/lib/api-auth";
 
 /**
  * Book Catalog API
- *
- * GET /api/book-sales/catalog
- *   ?grade=10          → filter by grade
- *   ?year=25-26        → filter by year
- *   ?active_only=true  → only active books
- *
- * POST /api/book-sales/catalog
- *   { action: "create_book", ...fields }
- *   { action: "update_book", id, ...fields }
- *   { action: "delete_book", id }
- *   { action: "bulk_import", books: [...] }
  */
 
 const COLLECTION = "book_catalog";
 
-// ── GET ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
+    const supabase = createServiceClient();
     const grade = req.nextUrl.searchParams.get("grade");
     const year = req.nextUrl.searchParams.get("year");
     const activeOnly = req.nextUrl.searchParams.get("active_only") === "true";
@@ -33,15 +21,15 @@ export async function GET(req: NextRequest) {
     const cached = getCached<unknown[]>(cacheKey);
     if (cached) return NextResponse.json({ books: cached }, { headers: CACHE_MEDIUM });
 
-    let query: FirebaseFirestore.Query = adminDb.collection(COLLECTION);
+    let query = supabase.from(COLLECTION).select("*").limit(5000);
+    if (grade) query = query.eq("grade", grade);
+    if (year) query = query.eq("year", year);
+    if (activeOnly) query = query.eq("is_active", true);
 
-    if (grade) query = query.where("grade", "==", grade);
-    if (year) query = query.where("year", "==", year);
-    if (activeOnly) query = query.where("is_active", "==", true);
+    const { data, error } = await query;
+    if (error) throw error;
 
-    const snap = await query.get();
-    const books = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
+    const books = data || [];
     setCache(cacheKey, books);
     return NextResponse.json({ books }, { headers: CACHE_MEDIUM });
   } catch (err) {
@@ -50,33 +38,28 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST ───────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const auth = await verifyAdmin(req);
   if (!auth.ok) return auth.response;
 
   try {
+    const supabase = createServiceClient();
     const body = await req.json();
     const { action } = body;
 
-    // ── Create book ──
     if (action === "create_book") {
       const { title, title_ar, grade, subject, price, isbn, year, is_active } = body;
 
       if (!title || !grade || price == null) {
-        return NextResponse.json(
-          { error: "title, grade, and price are required" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "title, grade, and price are required" }, { status: 400 });
       }
       if (typeof price !== "number" || price <= 0) {
-        return NextResponse.json(
-          { error: "price must be a positive number" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "price must be a positive number" }, { status: 400 });
       }
 
+      const id = crypto.randomUUID();
       const doc = {
+        id,
         title: String(title).trim(),
         title_ar: title_ar ? String(title_ar).trim() : "",
         grade: String(grade),
@@ -85,53 +68,52 @@ export async function POST(req: NextRequest) {
         isbn: isbn ? String(isbn).trim() : "",
         year: year ? String(year) : "",
         is_active: is_active !== false,
-        created_at: FieldValue.serverTimestamp(),
-        updated_at: FieldValue.serverTimestamp(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       };
 
-      const ref = await adminDb.collection(COLLECTION).add(doc);
+      const { error } = await supabase.from(COLLECTION).insert(doc);
+      if (error) throw error;
       invalidateCache("book_catalog:");
-      return NextResponse.json({ id: ref.id, ...doc });
+      return NextResponse.json(doc);
     }
 
-    // ── Update book ──
     if (action === "update_book") {
       const { id, ...fields } = body;
-      if (!id) {
-        return NextResponse.json({ error: "id is required" }, { status: 400 });
-      }
+      if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-      // Only allow known fields
       const allowed = ["title", "title_ar", "grade", "subject", "price", "isbn", "year", "is_active"];
-      const updates: Record<string, unknown> = { updated_at: FieldValue.serverTimestamp() };
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
       for (const key of allowed) {
         if (fields[key] !== undefined) {
           if (key === "price") {
             if (typeof fields[key] !== "number" || fields[key] <= 0) {
               return NextResponse.json({ error: "price must be a positive number" }, { status: 400 });
             }
+            updates[key] = Number(fields[key]);
+          } else {
+            updates[key] = fields[key];
           }
-          updates[key] = key === "price" ? Number(fields[key]) : fields[key];
         }
       }
 
-      await adminDb.collection(COLLECTION).doc(id).update(updates);
+      const { error } = await supabase.from(COLLECTION).update(updates).eq("id", id);
+      if (error) throw error;
       invalidateCache("book_catalog:");
       return NextResponse.json({ success: true, id });
     }
 
-    // ── Delete book ──
     if (action === "delete_book") {
       const { id } = body;
-      if (!id) {
-        return NextResponse.json({ error: "id is required" }, { status: 400 });
-      }
-      await adminDb.collection(COLLECTION).doc(id).delete();
+      if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+
+      const { error } = await supabase.from(COLLECTION).delete().eq("id", id);
+      if (error) throw error;
       invalidateCache("book_catalog:");
       return NextResponse.json({ success: true, id });
     }
 
-    // ── Bulk import ──
     if (action === "bulk_import") {
       const { books } = body;
       if (!Array.isArray(books) || books.length === 0) {
@@ -141,14 +123,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Maximum 500 books per import" }, { status: 400 });
       }
 
-      const batch = adminDb.batch();
-      let count = 0;
-
+      const rows: Record<string, unknown>[] = [];
       for (const book of books) {
         if (!book.title || !book.grade || !book.price || Number(book.price) <= 0) continue;
-
-        const ref = adminDb.collection(COLLECTION).doc();
-        batch.set(ref, {
+        rows.push({
+          id: crypto.randomUUID(),
           title: String(book.title).trim(),
           title_ar: book.title_ar ? String(book.title_ar).trim() : "",
           grade: String(book.grade),
@@ -157,15 +136,15 @@ export async function POST(req: NextRequest) {
           isbn: book.isbn ? String(book.isbn).trim() : "",
           year: book.year ? String(book.year) : "",
           is_active: book.is_active !== false,
-          created_at: FieldValue.serverTimestamp(),
-          updated_at: FieldValue.serverTimestamp(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         });
-        count++;
       }
 
-      await batch.commit();
+      const { error } = await supabase.from(COLLECTION).insert(rows);
+      if (error) throw error;
       invalidateCache("book_catalog:");
-      return NextResponse.json({ success: true, imported: count });
+      return NextResponse.json({ success: true, imported: rows.length });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

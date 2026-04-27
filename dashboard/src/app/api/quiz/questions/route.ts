@@ -1,75 +1,37 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { CACHE_SHORT, CACHE_NONE } from "@/lib/cache-headers";
 
-/**
- * Quiz Questions API
- *
- * GET  /api/quiz/questions
- *   ?subject=Math           → filter by subject
- *   ?difficulty=3           → filter by difficulty (1-5)
- *   ?class=G10              → filter by class
- *   ?createdBy=teacher_user → filter by author
- *   ?limit=50               → limit results
- *
- * POST /api/quiz/questions
- *   { action: "create", question: {...} }
- *   { action: "update", questionId, updates: {...} }
- *   { action: "delete", questionId }
- *   { action: "bulk_create", questions: [...] }
- */
-
 interface QuizQuestion {
-  text: string;
-  text_ar?: string;
-  type: "mcq";
-  subject: string;
-  class_code: string;
-  difficulty: number; // 1-5
-  options: { label: string; text: string; text_ar?: string }[];
-  correct_option: string; // "A", "B", "C", "D"
-  explanation?: string;
-  standard?: string; // curriculum standard tag
-  created_by: string;
-  year: string;
+  text: string; text_ar?: string; type: "mcq"; subject: string; class_code: string; difficulty: number;
+  options: { label: string; text: string; text_ar?: string }[]; correct_option: string;
+  explanation?: string; standard?: string; created_by: string; year: string;
 }
 
-// ── GET ─────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const subject = req.nextUrl.searchParams.get("subject");
   const difficulty = req.nextUrl.searchParams.get("difficulty");
   const classCode = req.nextUrl.searchParams.get("class");
   const createdBy = req.nextUrl.searchParams.get("createdBy");
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "200"), 500);
+  const supabase = createServiceClient();
 
   try {
-    let query: FirebaseFirestore.Query = adminDb.collection("quiz_questions");
-
-    if (subject) query = query.where("subject", "==", subject);
-    if (difficulty) query = query.where("difficulty", "==", parseInt(difficulty));
-    if (classCode) query = query.where("class_code", "==", classCode);
+    let q = supabase.from("quiz_questions").select("*").limit(limit);
+    if (subject) q = q.eq("subject", subject);
+    if (difficulty) q = q.eq("difficulty", parseInt(difficulty));
+    if (classCode) q = q.eq("class_code", classCode);
     if (createdBy) {
-      // Support both username ("cezar.dagher") and email ("cezar.dagher@kis-riyadh.com")
       const variants = [createdBy];
       if (!createdBy.includes("@")) variants.push(`${createdBy}@kis-riyadh.com`);
-      query = query.where("created_by", "in", variants);
+      q = q.in("created_by", variants);
     }
-
-    query = query.limit(limit);
-
-    const snap = await query.get();
-    const questions = snap.docs
-      .map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }))
-      .sort((a: any, b: any) => {
-        const ta = a.created_at?._seconds || 0;
-        const tb = b.created_at?._seconds || 0;
-        return tb - ta;
-      });
-
+    const { data } = await q;
+    const questions = (data ?? []).sort((a, b) => {
+      const ta = new Date((a as Record<string,unknown>).created_at as string || 0).getTime();
+      const tb = new Date((b as Record<string,unknown>).created_at as string || 0).getTime();
+      return tb - ta;
+    });
     return NextResponse.json({ questions, total: questions.length }, { headers: CACHE_SHORT });
   } catch (err) {
     console.error("Quiz questions GET error:", err);
@@ -77,104 +39,50 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST ────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const supabase = createServiceClient();
   try {
     const body = await req.json();
     const { action } = body;
 
-    // ── Create single question ──
     if (action === "create") {
       const q = body.question as QuizQuestion;
-      if (!q.text || !q.subject || !q.class_code || !q.correct_option || !q.options?.length) {
-        return NextResponse.json(
-          { error: "text, subject, class_code, options, and correct_option required" },
-          { status: 400 }
-        );
-      }
-
-      if (q.difficulty < 1 || q.difficulty > 5) {
-        return NextResponse.json({ error: "difficulty must be 1-5" }, { status: 400 });
-      }
-
-      const ref = adminDb.collection("quiz_questions").doc();
-      await ref.set({
-        ...q,
-        type: "mcq",
-        created_at: FieldValue.serverTimestamp(),
-        updated_at: FieldValue.serverTimestamp(),
-      });
-
-      return NextResponse.json({ success: true, questionId: ref.id }, { headers: CACHE_NONE });
+      if (!q.text || !q.subject || !q.class_code || !q.correct_option || !q.options?.length) return NextResponse.json({ error: "text, subject, class_code, options, and correct_option required" }, { status: 400 });
+      if (q.difficulty < 1 || q.difficulty > 5) return NextResponse.json({ error: "difficulty must be 1-5" }, { status: 400 });
+      const { data } = await supabase.from("quiz_questions").insert({ ...q, type: "mcq", created_at: new Date().toISOString(), updated_at: new Date().toISOString() }).select("id").single();
+      return NextResponse.json({ success: true, questionId: (data as Record<string,unknown>).id }, { headers: CACHE_NONE });
     }
 
-    // ── Bulk create ──
     if (action === "bulk_create") {
       const questions = body.questions as QuizQuestion[];
-      if (!questions?.length) {
-        return NextResponse.json({ error: "questions array required" }, { status: 400 });
-      }
-
-      const batch = adminDb.batch();
-      const ids: string[] = [];
-
-      for (const q of questions) {
-        if (!q.text || !q.subject || !q.class_code || !q.correct_option || !q.options?.length) continue;
-        const ref = adminDb.collection("quiz_questions").doc();
-        batch.set(ref, {
-          ...q,
-          type: "mcq",
-          difficulty: Math.max(1, Math.min(5, q.difficulty || 3)),
-          created_at: FieldValue.serverTimestamp(),
-          updated_at: FieldValue.serverTimestamp(),
-        });
-        ids.push(ref.id);
-      }
-
-      await batch.commit();
+      if (!questions?.length) return NextResponse.json({ error: "questions array required" }, { status: 400 });
+      const now = new Date().toISOString();
+      const rows = questions.filter((q) => q.text && q.subject && q.class_code && q.correct_option && q.options?.length)
+        .map((q) => ({ ...q, type: "mcq" as const, difficulty: Math.max(1, Math.min(5, q.difficulty || 3)), created_at: now, updated_at: now }));
+      const { data } = await supabase.from("quiz_questions").insert(rows).select("id");
+      const ids = (data ?? []).map((r) => (r as Record<string,unknown>).id as string);
       return NextResponse.json({ success: true, count: ids.length, ids }, { headers: CACHE_NONE });
     }
 
-    // ── Update ──
     if (action === "update") {
       const { questionId, updates } = body;
-      if (!questionId) {
-        return NextResponse.json({ error: "questionId required" }, { status: 400 });
-      }
-
-      // Prevent tampering with system fields
+      if (!questionId) return NextResponse.json({ error: "questionId required" }, { status: 400 });
       const { created_at, ...safeUpdates } = updates;
-      await adminDb.collection("quiz_questions").doc(questionId).update({
-        ...safeUpdates,
-        updated_at: FieldValue.serverTimestamp(),
-      });
-
+      await supabase.from("quiz_questions").update({ ...safeUpdates, updated_at: new Date().toISOString() }).eq("id", questionId);
       return NextResponse.json({ success: true }, { headers: CACHE_NONE });
     }
 
-    // ── Delete ──
     if (action === "delete") {
       const { questionId } = body;
-      if (!questionId) {
-        return NextResponse.json({ error: "questionId required" }, { status: 400 });
-      }
-
-      // Check if question is used in any active assignment
-      const usedSnap = await adminDb
-        .collection("quiz_assignments")
-        .where("question_ids", "array-contains", questionId)
-        .where("status", "==", "active")
-        .limit(1)
-        .get();
-
-      if (!usedSnap.empty) {
-        return NextResponse.json(
-          { error: "Cannot delete: question is used in an active quiz assignment" },
-          { status: 409 }
-        );
-      }
-
-      await adminDb.collection("quiz_questions").doc(questionId).delete();
+      if (!questionId) return NextResponse.json({ error: "questionId required" }, { status: 400 });
+      // Check if used in active assignment
+      const { data: assignments } = await supabase.from("quiz_assignments").select("id").eq("status", "active").limit(1000);
+      const active = (assignments ?? []).filter((a) => {
+        const ids = (a as Record<string,unknown>).question_ids as string[] || [];
+        return Array.isArray(ids) && ids.includes(questionId);
+      });
+      if (active.length > 0) return NextResponse.json({ error: "Cannot delete: question is used in an active quiz assignment" }, { status: 409 });
+      await supabase.from("quiz_questions").delete().eq("id", questionId);
       return NextResponse.json({ success: true }, { headers: CACHE_NONE });
     }
 

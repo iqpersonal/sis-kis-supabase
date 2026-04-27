@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { getDb } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 
 interface VerificationData {
   studentName: string;
@@ -26,13 +24,13 @@ export default function VerifyPage() {
     }
     (async () => {
       try {
-        const snap = await getDoc(doc(getDb(), "diploma_verifications", code));
-        if (snap.exists()) {
-          const d = snap.data();
+        const res = await fetch(`/api/diploma-verifications?id=${encodeURIComponent(code)}`);
+        if (res.ok) {
+          const json = await res.json();
           setData({
-            studentName: d.studentName || "",
-            studentNumber: d.studentNumber || "",
-            ceremonyDate: d.ceremonyDate || "",
+            studentName: json.student_name || "",
+            studentNumber: json.student_number || "",
+            ceremonyDate: json.ceremony_date || "",
           });
           setStatus("valid");
         } else {

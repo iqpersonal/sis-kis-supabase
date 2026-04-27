@@ -20,10 +20,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { TestTube, Plus, CheckCircle, XCircle, Clock, Search } from "lucide-react";
-import { getDb } from "@/lib/firebase";
-import {
-  collection, getDocs, doc, setDoc, updateDoc,
-} from "firebase/firestore";
 
 interface Student { name: string; gender: string; desired_grade: string }
 
@@ -72,16 +68,13 @@ export default function EntranceTestsPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const db = getDb();
-      const [testSnap, enqSnap] = await Promise.all([
-        getDocs(collection(db, "admission_tests")),
-        getDocs(collection(db, "admission_enquiries")),
-      ]);
-      const testList: TestRecord[] = [];
-      testSnap.forEach((d) => {
-        const raw = d.data();
-        testList.push({
-          id: d.id,
+      const res = await fetch("/api/admissions/tests?includeEnquiries=1", { cache: "no-store" });
+      const json = await res.json();
+      const rawTests = (json.tests || []) as Record<string, unknown>[];
+      const rawEnquiries = (json.enquiries || []) as Record<string, unknown>[];
+
+      const testList: TestRecord[] = rawTests.map((raw) => ({
+          id: String(raw.id || ""),
           enquiry_ref: raw.enquiry_ref || raw.ref_number || "",
           parent_name: raw.parent_name || "",
           student_name: raw.student_name || "",
@@ -94,13 +87,17 @@ export default function EntranceTestsPage() {
           notes: raw.notes || "",
           created_at: raw.created_at || "",
           updated_at: raw.updated_at || raw.created_at || "",
-        });
-      });
+        })) as TestRecord[];
       testList.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
       setTests(testList);
 
-      const enqList: Enquiry[] = [];
-      enqSnap.forEach((d) => enqList.push(d.data() as Enquiry));
+      const enqList = rawEnquiries.map((d) => ({
+        ref_number: String(d.ref_number || ""),
+        parent_name: String(d.parent_name || ""),
+        phone: String(d.phone || ""),
+        students: (d.students as Student[]) || [],
+        status: String(d.status || "new"),
+      }));
       setEnquiries(enqList);
     } catch (err) {
       console.error("Failed to load tests:", err);
@@ -125,7 +122,6 @@ export default function EntranceTestsPage() {
 
     setSaving(true);
     try {
-      const db = getDb();
       const ref = schedForm.enquiry_ref.toUpperCase().replace(/\s/g, "");
       const testId = `${ref}_${student.name.replace(/\s+/g, "_")}_${Date.now()}`;
       const now = new Date().toISOString();
@@ -144,14 +140,11 @@ export default function EntranceTestsPage() {
         updated_at: now,
       };
 
-      await setDoc(doc(db, "admission_tests", testId), record);
-      // Also update enquiry status
-      if (enq && (enq.status === "contacted" || enq.status === "new")) {
-        await updateDoc(doc(db, "admission_enquiries", enq.ref_number), {
-          status: "test_scheduled",
-          updated_at: now,
-        });
-      }
+      await fetch("/api/admissions/tests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...record, id: testId }),
+      });
 
       setTests((prev) => [{ id: testId, ...record }, ...prev]);
       setShowScheduleDialog(false);
@@ -168,7 +161,6 @@ export default function EntranceTestsPage() {
     if (!editTest) return;
     setSaving(true);
     try {
-      const db = getDb();
       const now = new Date().toISOString();
       const update = {
         math_score: editTest.math_score,
@@ -178,15 +170,11 @@ export default function EntranceTestsPage() {
         notes: editTest.notes,
         updated_at: now,
       };
-      await updateDoc(doc(db, "admission_tests", editTest.id), update);
-
-      // Update enquiry status to test_done if all tests for that enquiry have results
-      if (editTest.result !== "pending") {
-        await updateDoc(doc(db, "admission_enquiries", editTest.enquiry_ref), {
-          status: "test_done",
-          updated_at: now,
-        });
-      }
+      await fetch("/api/admissions/tests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editTest.id, enquiry_ref: editTest.enquiry_ref, ...update }),
+      });
 
       setTests((prev) =>
         prev.map((t) => t.id === editTest.id ? { ...editTest, updated_at: now } : t)

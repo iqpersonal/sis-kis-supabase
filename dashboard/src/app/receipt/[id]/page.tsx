@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import ReceiptActions from "./receipt-actions";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -45,26 +45,16 @@ function formatDate(iso: string): string {
 async function getReceipt(id: string): Promise<ReceiptData | null> {
   if (!id || id.length > 128) return null;
   try {
-    const doc = await adminDb.collection("book_sales").doc(id).get();
-    if (!doc.exists) return null;
-    const sale = doc.data()!;
-
-    let created_at = "";
-    if (sale.created_at?.toDate) {
-      created_at = sale.created_at.toDate().toISOString();
-    } else if (typeof sale.created_at === "string") {
-      created_at = sale.created_at;
-    }
-
-    let voided_at = "";
-    if (sale.voided_at?.toDate) {
-      voided_at = sale.voided_at.toDate().toISOString();
-    } else if (typeof sale.voided_at === "string") {
-      voided_at = sale.voided_at;
-    }
+    const supabase = createServiceClient();
+    const { data: sale } = await supabase
+      .from("book_sales")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (!sale) return null;
 
     return {
-      id: doc.id,
+      id: String(sale.id || ""),
       receipt_number: sale.receipt_number || "",
       student_name: sale.student_name || "",
       student_number: sale.student_number || "",
@@ -81,9 +71,9 @@ async function getReceipt(id: string): Promise<ReceiptData | null> {
       payment_method: sale.payment_method || "cash",
       status: sale.status || "paid",
       year: sale.year || "",
-      created_at,
+      created_at: typeof sale.created_at === "string" ? sale.created_at : (sale.created_at ? String(sale.created_at) : ""),
       void_reason: sale.void_reason || "",
-      voided_at,
+      voided_at: typeof sale.voided_at === "string" ? sale.voided_at : (sale.voided_at ? String(sale.voided_at) : ""),
     };
   } catch {
     return null;

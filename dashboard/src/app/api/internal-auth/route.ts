@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { verifyPassword, hashPassword } from "@/lib/password";
 
 interface InternalAuthBody {
@@ -11,18 +11,18 @@ function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function buildTeacherProfile(uid: string, doc: FirebaseFirestore.DocumentData) {
+function buildTeacherProfile(uid: string, row: Record<string, unknown>) {
   return {
     uid,
-    email: doc.email || "",
-    displayName: doc.displayName || "",
-    firstName: doc.firstName || "",
-    lastName: doc.lastName || "",
-    username: doc.username || "",
-    grade: doc.grade || "",
-    schoolYear: doc.schoolYear || "",
-    role: doc.role || "teacher",
-    secondary_roles: Array.isArray(doc.secondary_roles) ? doc.secondary_roles : [],
+    email: row.email || "",
+    displayName: row.display_name || "",
+    firstName: row.first_name || "",
+    lastName: row.last_name || "",
+    username: row.username || "",
+    grade: row.grade || "",
+    schoolYear: row.school_year || "",
+    role: row.role || "teacher",
+    secondary_roles: Array.isArray(row.secondary_roles) ? row.secondary_roles : [],
   };
 }
 
@@ -40,138 +40,99 @@ export async function POST(req: NextRequest) {
     }
 
     const normalized = normalizeEmail(identifier);
+    const supabase = createServiceClient();
 
-    // 1) Try admin_users by username first, then by email.
-    const byUsername = await adminDb
-      .collection("admin_users")
-      .where("username", "==", normalized)
-      .limit(1)
-      .get();
+    // 1) Try admin_users by username then email
+    const { data: byUsername } = await supabase
+      .from("admin_users")
+      .select("*")
+      .eq("username", normalized)
+      .limit(1);
 
-    let userDoc: FirebaseFirestore.DocumentData | null = null;
-    let userUid: string | null = null;
+    let userRow: Record<string, unknown> | null = byUsername?.[0] ?? null;
 
-    if (!byUsername.empty) {
-      userDoc = byUsername.docs[0].data();
-      userUid = byUsername.docs[0].id;
-    } else {
-      const byEmail = await adminDb
-        .collection("admin_users")
-        .where("email", "==", normalized)
-        .limit(1)
-        .get();
-
-      if (!byEmail.empty) {
-        userDoc = byEmail.docs[0].data();
-        userUid = byEmail.docs[0].id;
-      }
+    if (!userRow) {
+      const { data: byEmail } = await supabase
+        .from("admin_users")
+        .select("*")
+        .eq("email", normalized)
+        .limit(1);
+      userRow = byEmail?.[0] ?? null;
     }
 
-    if (userDoc && userUid) {
-      const role = String(userDoc.role || "viewer");
+    if (userRow) {
+      const userUid = String(userRow.id || "");
+      const role = String(userRow.role || "viewer");
 
-      // Teachers: dual-role users MUST use Firebase auth so they get a real JWT
-      // in __session, enabling navigation to admin-portal secondary pages.
-      // Pure teachers (no secondary roles) keep the legacy local-password flow.
       if (role === "teacher") {
-        const hasSecondaryRoles =
-          Array.isArray(userDoc.secondary_roles) && userDoc.secondary_roles.length > 0;
-        const teacherEmail = String(userDoc.email || "").trim().toLowerCase();
+        const hasSecondaryRoles = Array.isArray(userRow.secondary_roles) && (userRow.secondary_roles as unknown[]).length > 0;
+        const teacherEmail = String(userRow.email || "").trim().toLowerCase();
 
-        if (!hasSecondaryRoles && userDoc.password) {
-          const { match, needsUpgrade } = await verifyPassword(password, String(userDoc.password));
+        if (!hasSecondaryRoles && userRow.password_hash) {
+          const { match, needsUpgrade } = await verifyPassword(password, String(userRow.password_hash));
           if (match) {
             if (needsUpgrade) {
               const hashed = await hashPassword(password);
-              await adminDb.collection("admin_users").doc(userUid).update({ password: hashed });
+              await supabase.from("admin_users").update({ password_hash: hashed }).eq("id", userUid);
             }
             return NextResponse.json({
               ok: true,
               authMode: "teacher_local",
               target: "/teacher/dashboard",
-              teacher: buildTeacherProfile(userUid, userDoc),
+              teacher: buildTeacherProfile(userUid, userRow),
             });
           }
         }
 
-        // Dual-role teacher or no local password → use Firebase Auth for a real JWT.
         if (!teacherEmail) {
-          return NextResponse.json(
-            { ok: false, error: "Invalid username or password" },
-            { status: 401 }
-          );
+          return NextResponse.json({ ok: false, error: "Invalid username or password" }, { status: 401 });
         }
         return NextResponse.json({
           ok: true,
           authMode: "firebase",
           target: "/teacher/dashboard",
           email: teacherEmail,
-          teacher: buildTeacherProfile(userUid, userDoc),
+          teacher: buildTeacherProfile(userUid, userRow),
         });
       }
 
-      // For non-teacher internal roles, complete sign-in via Firebase on client.
       const target = role === "staff" ? "/staff/dashboard" : "/dashboard";
-      const email = String(userDoc.email || "").trim().toLowerCase();
+      const email = String(userRow.email || "").trim().toLowerCase();
       if (!email) {
-        return NextResponse.json(
-          { ok: false, error: "Account is missing email" },
-          { status: 400 }
-        );
+        return NextResponse.json({ ok: false, error: "Account is missing email" }, { status: 400 });
       }
-
-      return NextResponse.json({
-        ok: true,
-        authMode: "firebase",
-        target,
-        email,
-      });
+      return NextResponse.json({ ok: true, authMode: "firebase", target, email });
     }
 
-    // 2) If not in admin_users, allow staff login discovery by staff email.
+    // 2) Staff login by email
     if (normalized.includes("@")) {
-      const staffByLower = await adminDb
-        .collection("staff")
-        .where("E_Mail", "==", normalized)
-        .limit(1)
-        .get();
+      const { data: staffRows } = await supabase
+        .from("staff")
+        .select("id, \"E_Mail\"")
+        .ilike("\"E_Mail\"", normalized)
+        .limit(1);
 
-      if (!staffByLower.empty) {
+      if (staffRows && staffRows.length > 0) {
+        const staffEmail = String((staffRows[0] as Record<string, unknown>)["E_Mail"] || normalized).trim().toLowerCase();
         return NextResponse.json({
           ok: true,
           authMode: "firebase",
           target: "/staff/dashboard",
-          email: normalized,
-        });
-      }
-
-      const staffByRaw = await adminDb
-        .collection("staff")
-        .where("E_Mail", "==", identifier)
-        .limit(1)
-        .get();
-
-      if (!staffByRaw.empty) {
-        const email = String(staffByRaw.docs[0].data().E_Mail || normalized).trim().toLowerCase();
-        return NextResponse.json({
-          ok: true,
-          authMode: "firebase",
-          target: "/staff/dashboard",
-          email,
+          email: staffEmail,
         });
       }
     }
 
-    // 3) Try parent (families collection) by username.
-    const familySnap = await adminDb
-      .collection("families")
-      .where("username", "==", identifier.trim())
-      .limit(1)
-      .get();
+    // 3) Parent (families) by username
+    const { data: famRows } = await supabase
+      .from("families")
+      .select("*")
+      .eq("username", identifier.trim())
+      .limit(1);
 
-    if (!familySnap.empty) {
-      const fData = familySnap.docs[0].data();
-      const storedPwd = String(fData.password || "");
+    if (famRows && famRows.length > 0) {
+      const fData = famRows[0] as Record<string, unknown>;
+      const storedPwd = String(fData.password_hash || "");
       const { match } = await verifyPassword(password, storedPwd);
       if (match) {
         return NextResponse.json({
@@ -179,7 +140,7 @@ export async function POST(req: NextRequest) {
           authMode: "parent_local",
           target: "/parent/dashboard",
           family: {
-            family_number: fData.family_number || familySnap.docs[0].id,
+            family_number: fData.family_number || fData.id || "",
             username: fData.username || "",
             father_name: fData.father_name || "",
             family_name: fData.family_name || "",
@@ -191,71 +152,47 @@ export async function POST(req: NextRequest) {
           },
         });
       }
-      return NextResponse.json(
-        { ok: false, error: "Invalid username or password" },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: "Invalid username or password" }, { status: 401 });
     }
 
-    // 4) Try student (raw_Student collection) by UserName.
-    const studentSnap = await adminDb
-      .collection("raw_Student")
-      .where("UserName", "==", identifier.trim())
-      .limit(1)
-      .get();
+    // 4) Student by username
+    const { data: studRows } = await supabase
+      .from("student_credentials")
+      .select("*")
+      .eq("username", identifier.trim())
+      .limit(1);
 
-    if (!studentSnap.empty) {
-      const sData = studentSnap.docs[0].data();
-      const storedPwd = String(sData.Password || "");
+    if (studRows && studRows.length > 0) {
+      const sData = studRows[0] as Record<string, unknown>;
+      const storedPwd = String(sData.password_hash || "");
       const { match, needsUpgrade } = await verifyPassword(password, storedPwd);
       if (!match) {
-        return NextResponse.json(
-          { ok: false, error: "Invalid username or password" },
-          { status: 401 }
-        );
+        return NextResponse.json({ ok: false, error: "Invalid username or password" }, { status: 401 });
       }
       if (needsUpgrade) {
         const hashed = await hashPassword(password);
-        await adminDb.collection("raw_Student").doc(studentSnap.docs[0].id).update({ Password: hashed });
+        await supabase.from("student_credentials").update({ password_hash: hashed }).eq("student_number", sData.student_number);
       }
-
-      const studentNumber = sData.Student_Number || identifier.trim();
-
-      // Look up student_credentials for the full profile.
-      const credSnap = await adminDb
-        .collection("student_credentials")
-        .where("student_number", "==", studentNumber)
-        .limit(1)
-        .get();
-
-      const cred = credSnap.empty ? null : credSnap.docs[0].data();
-
       return NextResponse.json({
         ok: true,
         authMode: "student_local",
         target: "/student/dashboard",
         student: {
-          student_number: studentNumber,
-          student_name: cred?.student_name || sData.E_Name || "",
-          gender: cred?.gender || sData.Gender || "",
-          class_name: cred?.class_name || "",
-          section_name: cred?.section_name || "",
-          school: cred?.school || sData.School_Number || "",
-          family_number: cred?.family_number || sData.Family_Number || "",
-          academic_year: cred?.academic_year || "",
+          student_number: sData.student_number || identifier.trim(),
+          student_name: sData.student_name || "",
+          gender: sData.gender || "",
+          class_name: sData.class_name || "",
+          section_name: sData.section_name || "",
+          school: sData.school || "",
+          family_number: sData.family_number || "",
+          academic_year: sData.academic_year || "",
         },
       });
     }
 
-    return NextResponse.json(
-      { ok: false, error: "Invalid username or password" },
-      { status: 401 }
-    );
+    return NextResponse.json({ ok: false, error: "Invalid username or password" }, { status: 401 });
   } catch (err) {
     console.error("Internal auth error:", err);
-    return NextResponse.json(
-      { ok: false, error: "Authentication failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: "Authentication failed" }, { status: 500 });
   }
 }

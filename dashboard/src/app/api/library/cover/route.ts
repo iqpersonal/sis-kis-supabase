@@ -1,87 +1,60 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /**
  * POST /api/library/cover
  * { bookId, isbn, title, author }
- *
- * Attempts to find a cover image for the book using:
- *   1. Open Library by ISBN   (free, no key)
- *   2. Google Books API by ISBN then by title+author (free, no key for basic search)
- * Saves the found cover_url to library_books/{bookId} and returns it.
+ * Fetches cover image from Open Library / Google Books and saves to library_books.
  */
 export async function POST(req: NextRequest) {
   try {
     const { bookId, isbn, title, author } = await req.json() as {
-      bookId: string;
-      isbn?: string;
-      title?: string;
-      author?: string;
+      bookId: string; isbn?: string; title?: string; author?: string;
     };
 
-    if (!bookId) {
-      return NextResponse.json({ error: "bookId is required" }, { status: 400 });
-    }
+    if (!bookId) return NextResponse.json({ error: "bookId is required" }, { status: 400 });
 
     let coverUrl: string | null = null;
 
-    // ── 1. Open Library by ISBN ──────────────────────────────────
+    // 1. Open Library by ISBN
     if (isbn) {
       const olUrl = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
-      // Open Library returns a 1×1 pixel GIF when the cover doesn't exist.
-      // We verify by checking the Content-Length header (real covers are >5 KB).
       try {
         const probe = await fetch(olUrl, { method: "HEAD" });
         const len = Number(probe.headers.get("content-length") ?? "0");
-        if (probe.ok && len > 5000) {
-          coverUrl = olUrl;
-        }
-      } catch {
-        /* ignore */
-      }
+        if (probe.ok && len > 5000) coverUrl = olUrl;
+      } catch { /* ignore */ }
     }
 
-    // ── 2. Google Books API by ISBN ──────────────────────────────
+    // 2. Google Books by ISBN
     if (!coverUrl && isbn) {
       try {
-        const gbRes = await fetch(
-          `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&maxResults=1`
-        );
+        const gbRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&maxResults=1`);
         if (gbRes.ok) {
           const gbData = await gbRes.json() as { items?: Array<{ volumeInfo?: { imageLinks?: { thumbnail?: string; smallThumbnail?: string } } }> };
-          const img = gbData.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
-            ?? gbData.items?.[0]?.volumeInfo?.imageLinks?.smallThumbnail;
+          const img = gbData.items?.[0]?.volumeInfo?.imageLinks?.thumbnail ?? gbData.items?.[0]?.volumeInfo?.imageLinks?.smallThumbnail;
           if (img) coverUrl = img.replace("http://", "https://");
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     }
 
-    // ── 3. Google Books API by title + author ────────────────────
+    // 3. Google Books by title + author
     if (!coverUrl && title) {
       try {
         const q = [title, author].filter(Boolean).join("+intitle:");
-        const gbRes = await fetch(
-          `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(q)}&maxResults=1`
-        );
+        const gbRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(q)}&maxResults=1`);
         if (gbRes.ok) {
           const gbData = await gbRes.json() as { items?: Array<{ volumeInfo?: { imageLinks?: { thumbnail?: string; smallThumbnail?: string } } }> };
-          const img = gbData.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
-            ?? gbData.items?.[0]?.volumeInfo?.imageLinks?.smallThumbnail;
+          const img = gbData.items?.[0]?.volumeInfo?.imageLinks?.thumbnail ?? gbData.items?.[0]?.volumeInfo?.imageLinks?.smallThumbnail;
           if (img) coverUrl = img.replace("http://", "https://");
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     }
 
-    if (!coverUrl) {
-      return NextResponse.json({ message: "No cover found online for this book." });
-    }
+    if (!coverUrl) return NextResponse.json({ message: "No cover found online for this book." });
 
-    // Save to Firestore
-    await adminDb.collection("library_books").doc(bookId).update({ cover_url: coverUrl });
+    const supabase = createServiceClient();
+    await supabase.from("library_books").update({ cover_url: coverUrl, updated_at: new Date().toISOString() }).eq("id", bookId);
 
     return NextResponse.json({ cover_url: coverUrl });
   } catch (err) {

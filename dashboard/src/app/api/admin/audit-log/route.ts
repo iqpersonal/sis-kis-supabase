@@ -1,57 +1,24 @@
-import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { CACHE_SHORT } from "@/lib/cache-headers";
-
-/**
- * GET /api/admin/audit-log?limit=50&action=user.create&startAfter=<docId>
- * Returns audit log entries sorted by timestamp descending.
- * Requires super_admin or academic role.
- */
-
-async function verifyAuditAccess(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  try {
-    const decoded = await adminAuth.verifyIdToken(authHeader.slice(7));
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    if (!snap.exists) return null;
-    const role = snap.data()?.role;
-    if (role === "super_admin") return decoded.email || decoded.uid;
-    return null;
-  } catch {
-    return null;
-  }
-}
+import { verifyAdmin } from "@/lib/api-auth";
 
 export async function GET(req: NextRequest) {
-  const caller = await verifyAuditAccess(req);
-  if (!caller) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const auth = await verifyAdmin(req);
+  if (!auth.ok) return auth.response;
+  if (auth.role !== "super_admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const url = new URL(req.url);
   const limit = Math.min(Number(url.searchParams.get("limit") || "50"), 200);
   const actionFilter = url.searchParams.get("action") || "";
   const startAfter = url.searchParams.get("startAfter") || "";
 
-  let query = adminDb
-    .collection("audit_log")
-    .orderBy("timestamp", "desc")
-    .limit(limit);
+  const supabase = createServiceClient();
+  let q = supabase.from("audit_log").select("id, actor, action, details, target_id, target_type, timestamp").order("timestamp", { ascending: false }).limit(limit);
 
-  if (actionFilter) {
-    query = query.where("action", "==", actionFilter);
-  }
+  if (actionFilter) q = q.eq("action", actionFilter);
+  if (startAfter) q = q.lt("id", startAfter);
 
-  if (startAfter) {
-    const cursor = await adminDb.collection("audit_log").doc(startAfter).get();
-    if (cursor.exists) {
-      query = query.startAfter(cursor);
-    }
-  }
-
-  const snap = await query.get();
-  const entries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-  return NextResponse.json({ entries, count: entries.length }, { headers: CACHE_SHORT });
+  const { data } = await q;
+  return NextResponse.json({ entries: data ?? [], count: (data ?? []).length }, { headers: CACHE_SHORT });
 }

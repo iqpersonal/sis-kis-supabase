@@ -30,9 +30,8 @@ import { Loader2, Download, Search, BarChart3, PieChartIcon } from "lucide-react
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
 import { useClassNames } from "@/hooks/use-classes";
-import { getDb } from "@/lib/firebase";
-import { collection, query, where, getDocs } from "firebase/firestore";
 import { exportToCSV } from "@/lib/export-csv";
+
 
 /* ── types ────────────────────────────────────────────────────── */
 interface NatRow {
@@ -134,18 +133,20 @@ export function NationalityReport() {
     let cancelled = false;
     (async () => {
       try {
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", selectedYear || "25-26"),
-          where("Major_Code", "==", school)
-        );
-        const snap = await getDocs(q);
+        const params = new URLSearchParams({
+          action: "collection",
+          table: "sections",
+          year: selectedYear || "25-26",
+          limit: "2000",
+        });
+        const res = await fetch(`/api/sis-data?${params}`);
+        const json = await res.json();
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
+        (json.data ?? []).forEach((data: Record<string, unknown>) => {
           const classCode = String(data.Class_Code || "");
-          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
+          const majorCode = String(data.Major_Code || "");
+          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode) && majorCode === school) {
             items.push({
               classCode,
               sectionCode: String(data.Section_Code),

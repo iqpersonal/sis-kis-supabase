@@ -15,8 +15,6 @@ import {
   TrendingUp, ArrowRight, Phone, Mail,
 } from "lucide-react";
 import Link from "next/link";
-import { getDb } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
 
 /* ── Status config ── */
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -63,10 +61,9 @@ export default function AdmissionsDashboardPage() {
   useEffect(() => {
     async function load() {
       try {
-        const db = getDb();
-        const snap = await getDocs(collection(db, "admission_enquiries"));
-        const all: Enquiry[] = [];
-        snap.forEach((d) => all.push(d.data() as Enquiry));
+        const res = await fetch("/api/admissions/enquiries?limit=500", { cache: "no-store" });
+        const json = await res.json();
+        const all = (json.enquiries || []) as Enquiry[];
 
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();

@@ -116,6 +116,7 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
   const [dnStatusFilter, setDnStatusFilter] = useState("all");
   const [dnBranchFilter, setDnBranchFilter] = useState("all");
   const [alertsExpanded, setAlertsExpanded] = useState(false);
+  const [qiError, setQiError] = useState<string | null>(null);
 
   // Quick Issue form
   const [qiForm, setQiForm] = useState<{
@@ -509,12 +510,14 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
       setShowQuickIssue(false);
       setQiForm({ staff: "", staffName: "", staffNameAr: "", department: "", branch: "", items: [], notes: "" });
       setQiStaffSearch("");
+      setQiError(null);
       if (data.dn_number) {
         setIssuedDn({ id: data.id, dn_number: data.dn_number });
       }
       fetchData();
     } catch (e) {
       console.error("Quick issue error:", e);
+      setQiError(e instanceof Error ? e.message : "Quick issue failed. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -1667,7 +1670,7 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
       </Dialog>
 
       {/* ═══════════════ DIALOG: QUICK ISSUE ═══════════════ */}
-      <Dialog open={showQuickIssue} onOpenChange={setShowQuickIssue}>
+      <Dialog open={showQuickIssue} onOpenChange={(open) => { setShowQuickIssue(open); if (!open) setQiError(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Truck className="h-5 w-5" /> Quick Issue</DialogTitle>
@@ -1780,6 +1783,11 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
           </div>
 
           <DialogFooter>
+            {qiError && (
+              <p className="flex-1 text-sm text-red-600 flex items-center gap-1">
+                <XCircle className="h-4 w-4 shrink-0" /> {qiError}
+              </p>
+            )}
             <Button variant="outline" onClick={() => setShowQuickIssue(false)}>Cancel</Button>
             <Button onClick={handleQuickIssue} disabled={saving || !qiForm.staff || qiForm.items.length === 0 || qiForm.items.some((i) => !i.item_id)}>
               {saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Truck className="mr-1 h-4 w-4" />}

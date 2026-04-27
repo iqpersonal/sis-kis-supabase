@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { verifyAdmin } from "@/lib/api-auth";
 import { normalizePhone } from "@/lib/whatsapp";
 import crypto from "crypto";
@@ -16,6 +16,7 @@ import crypto from "crypto";
 export async function POST(req: NextRequest) {
   const auth = await verifyAdmin(req);
   if (!auth.ok) return auth.response;
+  const supabase = createServiceClient();
 
   try {
     const { audience, audience_filter } = await req.json();
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Collect families based on audience
-    const families = await collectFamilies(audience, audience_filter);
+    const families = await collectFamilies(supabase, audience, audience_filter);
 
     if (families.length === 0) {
       return NextResponse.json({ error: "No families found for the selected audience" }, { status: 404 });
@@ -35,13 +36,13 @@ export async function POST(req: NextRequest) {
     const tokens: { family_number: string; token: string; father_phone: string; mother_phone: string; father_name: string }[] = [];
 
     for (let i = 0; i < families.length; i += 400) {
-      const batch = adminDb.batch();
       const chunk = families.slice(i, i + 400);
+      const tokenRows: Record<string, unknown>[] = [];
 
       for (const fam of chunk) {
         const token = crypto.randomUUID();
-        const ref = adminDb.collection("contact_update_tokens").doc(token);
-        batch.set(ref, {
+        tokenRows.push({
+          id: token,
           family_number: fam.family_number,
           used: false,
           verified: false,
@@ -60,7 +61,8 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      await batch.commit();
+      const { error: tokenErr } = await supabase.from("contact_update_tokens").insert(tokenRows);
+      if (tokenErr) throw tokenErr;
     }
 
     return NextResponse.json({ success: true, tokens, count: tokens.length });
@@ -80,45 +82,53 @@ interface FamilyInfo {
 }
 
 async function collectFamilies(
+  supabase: ReturnType<typeof createServiceClient>,
   audience: string,
   filter?: Record<string, unknown>
 ): Promise<FamilyInfo[]> {
   const familyMap = new Map<string, FamilyInfo>();
 
   if (audience === "school" && filter?.school) {
-    const regSnap = await adminDb
-      .collection("registrations")
-      .where("School_Code", "==", filter.school)
-      .get();
+    const { data: regRows } = await supabase
+      .from("registrations")
+      .select("School_Code, school_code, Family_Number, family_number")
+      .or(`School_Code.eq.${String(filter.school)},school_code.eq.${String(filter.school)}`)
+      .limit(10000);
     const familyNumbers = new Set<string>();
-    regSnap.docs.forEach((doc) => {
-      const fn = doc.data().Family_Number;
+    (regRows || []).forEach((row) => {
+      const d = row as Record<string, unknown>;
+      const fn = d.Family_Number || d.family_number;
       if (fn) familyNumbers.add(String(fn));
     });
-    await fetchFamilies([...familyNumbers], familyMap);
+    await fetchFamilies(supabase, [...familyNumbers], familyMap);
   } else if (audience === "class" && filter?.school) {
     const targets = (filter.targets as { class: string; section?: string }[]) || [];
     const familyNumbers = new Set<string>();
     for (const target of targets) {
-      let q: FirebaseFirestore.Query = adminDb
-        .collection("registrations")
-        .where("School_Code", "==", filter.school)
-        .where("Class_Code", "==", target.class);
+      let q = supabase
+        .from("registrations")
+        .select("Family_Number, family_number")
+        .or(`School_Code.eq.${String(filter.school)},school_code.eq.${String(filter.school)}`)
+        .or(`Class_Code.eq.${String(target.class)},class_code.eq.${String(target.class)}`)
+        .limit(10000);
       if (target.section) {
-        q = q.where("Section_Code", "==", target.section);
+        q = q.or(`Section_Code.eq.${String(target.section)},section_code.eq.${String(target.section)}`);
       }
-      const snap = await q.get();
-      snap.docs.forEach((doc) => {
-        const fn = doc.data().Family_Number;
+      const { data: rows } = await q;
+      (rows || []).forEach((row) => {
+        const d = row as Record<string, unknown>;
+        const fn = d.Family_Number || d.family_number;
         if (fn) familyNumbers.add(String(fn));
       });
     }
-    await fetchFamilies([...familyNumbers], familyMap);
+    await fetchFamilies(supabase, [...familyNumbers], familyMap);
   } else {
     // "all"
-    const snap = await adminDb.collection("families").get();
-    snap.docs.forEach((doc) => {
-      const d = doc.data();
+    const { data: rows } = await supabase
+      .from("families")
+      .select("family_number, father_phone, mother_phone, father_name")
+      .limit(10000);
+    (rows || []).forEach((d) => {
       if (d.family_number) {
         familyMap.set(d.family_number, {
           family_number: d.family_number,
@@ -143,17 +153,17 @@ function hasValidPhone(phone: string): boolean {
 }
 
 async function fetchFamilies(
+  supabase: ReturnType<typeof createServiceClient>,
   familyNumbers: string[],
   map: Map<string, FamilyInfo>
 ) {
   for (let i = 0; i < familyNumbers.length; i += 30) {
     const chunk = familyNumbers.slice(i, i + 30);
-    const snap = await adminDb
-      .collection("families")
-      .where("family_number", "in", chunk)
-      .get();
-    snap.docs.forEach((doc) => {
-      const d = doc.data();
+    const { data: rows } = await supabase
+      .from("families")
+      .select("family_number, father_phone, mother_phone, father_name")
+      .in("family_number", chunk);
+    (rows || []).forEach((d) => {
       if (d.family_number) {
         map.set(d.family_number, {
           family_number: d.family_number,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { createServiceClient } from "@/lib/supabase-server";
 import { sendText, normalizePhone } from "@/lib/whatsapp";
 
 /**
@@ -14,17 +14,21 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const supabase = createServiceClient();
   try {
     const { token } = await params;
 
-    const tokenRef = adminDb.collection("contact_update_tokens").doc(token);
-    const tokenDoc = await tokenRef.get();
+    const { data: tokenDoc } = await supabase
+      .from("contact_update_tokens")
+      .select("*")
+      .eq("id", token)
+      .maybeSingle();
 
-    if (!tokenDoc.exists) {
+    if (!tokenDoc) {
       return NextResponse.json({ error: "invalid_token", message: "Invalid link" }, { status: 404 });
     }
 
-    const tokenData = tokenDoc.data()!;
+    const tokenData = tokenDoc as Record<string, unknown>;
 
     if (tokenData.used) {
       return NextResponse.json({ error: "token_used", message: "This link has already been used" }, { status: 410 });
@@ -35,29 +39,31 @@ export async function POST(
     }
 
     // Fetch family to get phone numbers
-    const famSnap = await adminDb
-      .collection("families")
-      .where("family_number", "==", tokenData.family_number)
-      .limit(1)
-      .get();
+    const { data: family } = await supabase
+      .from("families")
+      .select("*")
+      .eq("family_number", String(tokenData.family_number || ""))
+      .maybeSingle();
 
-    if (famSnap.empty) {
+    if (!family) {
       return NextResponse.json({ error: "family_not_found", message: "Family not found" }, { status: 404 });
     }
-
-    const family = famSnap.docs[0].data();
 
     // Generate 6-digit OTP
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
 
     // Store OTP on token doc
-    await tokenRef.update({
-      otp,
-      otp_expires_at: expiresAt,
-      otp_attempts: 0,
-      otp_sends: (tokenData.otp_sends || 0) + 1,
-    });
+    const { error: otpErr } = await supabase
+      .from("contact_update_tokens")
+      .update({
+        otp,
+        otp_expires_at: expiresAt,
+        otp_attempts: 0,
+        otp_sends: (Number(tokenData.otp_sends || 0) + 1),
+      })
+      .eq("id", token);
+    if (otpErr) throw otpErr;
 
     // Send OTP via WhatsApp to both phones
     const phones: string[] = [];
@@ -95,7 +101,7 @@ export async function POST(
       success: true,
       masked_phones: maskedPhones,
       sent: sentCount,
-      remaining_sends: 3 - ((tokenData.otp_sends || 0) + 1),
+      remaining_sends: 3 - (Number(tokenData.otp_sends || 0) + 1),
     });
   } catch (err) {
     console.error("send-otp error:", err);

@@ -12,13 +12,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebase-admin";
-import type { Role } from "@/lib/rbac";
+import { createServiceClient } from "@/lib/supabase-server";
+import { ROLE_PERMISSIONS, type Role } from "@/lib/rbac";
 
 interface AuthSuccess {
   ok: true;
   uid: string;
   role: Role;
+  secondaryRoles: Role[];
 }
 
 interface AuthFailure {
@@ -46,7 +47,7 @@ function extractToken(req: NextRequest): string | null {
 }
 
 /**
- * Verify that the request carries a valid Firebase ID token.
+ * Verify that the request carries a valid Supabase access token.
  * Returns the caller's uid and role if authenticated, or a 401/403 response.
  */
 export async function verifyAuth(req: NextRequest): Promise<AuthResult> {
@@ -59,16 +60,27 @@ export async function verifyAuth(req: NextRequest): Promise<AuthResult> {
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    const snap = await adminDb.collection("admin_users").doc(decoded.uid).get();
-    const data = snap.exists ? snap.data() : null;
+    const supabase = createServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "Invalid token" }, { status: 401 }),
+      };
+    }
+
+    const { data } = await supabase
+      .from("admin_users")
+      .select("role, roles, secondary_roles")
+      .eq("id", user.id)
+      .single();
 
     // Support both new `roles` array and legacy `role` string
     let role: Role;
     if (data?.roles && Array.isArray(data.roles) && data.roles.length > 0) {
       // Pick the "highest privilege" role from the array for single-role checks
       const PRIORITY: Role[] = [
-        "super_admin", "school_admin", "it_admin", "it_manager",
+        "super_admin", "school_admin", "doa", "it_admin", "it_manager",
         "academic_director", "head_of_section", "subject_coordinator", "academic",
         "finance", "accounts", "registrar", "teacher", "librarian",
         "store_clerk", "bookshop", "admissions", "viewer",
@@ -80,7 +92,11 @@ export async function verifyAuth(req: NextRequest): Promise<AuthResult> {
       role = (data?.role ?? "viewer") as Role;
     }
 
-    return { ok: true, uid: decoded.uid, role };
+    const secondaryRoles: Role[] = Array.isArray(data?.secondary_roles)
+      ? (data.secondary_roles as string[]).filter((r): r is Role => r in ROLE_PERMISSIONS) as Role[]
+      : [];
+
+    return { ok: true, uid: user.id, role, secondaryRoles };
   } catch {
     return {
       ok: false,
@@ -133,23 +149,24 @@ export async function verifySuperAdmin(req: NextRequest): Promise<AuthResult> {
 }
 
 /**
- * Verify the request has either a valid Firebase token (admin dashboard)
+ * Verify the request has either a valid Supabase access token (admin dashboard)
  * OR a valid portal session cookie (teacher/student/parent portals).
  * Returns ok:true if the caller is authenticated through either mechanism.
  *
- * NOTE: All portals now use the "__session" cookie (Firebase Hosting strips
- * every other cookie). The expectedValue param identifies the portal type.
+ * NOTE: All portals use the "__session" cookie. The expectedValue param
+ * identifies the portal type (teacher/student/parent).
  */
 export async function verifyAuthOrPortalSession(
   req: NextRequest,
   expectedValue: "teacher" | "student" | "parent"
 ): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
-  // Try Firebase Auth first (admin dashboard callers)
+  // Try Supabase Auth first (admin dashboard callers)
   const token = extractToken(req);
-  if (token) {
+  if (token && token !== expectedValue) {
     try {
-      await adminAuth.verifyIdToken(token);
-      return { ok: true };
+      const supabase = createServiceClient();
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (!error && user) return { ok: true };
     } catch { /* fall through to portal check */ }
   }
 

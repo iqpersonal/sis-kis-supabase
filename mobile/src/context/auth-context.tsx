@@ -1,12 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  type User,
-} from "firebase/auth";
-import { doc, getDoc, collection, query, where, getDocs, limit } from "firebase/firestore";
-import { auth, db } from "../lib/firebase";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabase";
 
 export type UserRole = "parent" | "teacher" | "admin" | "school_admin" | "store_clerk" | "it_manager" | "it_admin" | "super_admin" | "staff" | "librarian";
 
@@ -80,66 +74,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser);
-        try {
-          const userDoc = await getDoc(doc(db, "admin_users", firebaseUser.uid));
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            // Support both legacy `role` string and new `roles` array
-            const rolesArr: UserRole[] = Array.isArray(data.roles) && data.roles.length > 0
-              ? (data.roles as UserRole[])
-              : [(data.role as UserRole) || "admin"];
-            // Also merge secondary_roles (e.g. teacher who is also librarian)
-            if (Array.isArray(data.secondary_roles)) {
-              for (const r of data.secondary_roles as UserRole[]) {
-                if (!rolesArr.includes(r)) rolesArr.push(r);
-              }
-            }
-            setRoles(rolesArr);
-            setRole(rolesArr[0]);
-            setUsername(data.username || null);
-          } else {
-            // No admin_users doc → check staff collection
-            const email = firebaseUser.email || "";
-            const staffQ = query(
-              collection(db, "staff"),
-              where("E_Mail", "==", email.toLowerCase()),
-              limit(1)
-            );
-            const staffSnap = await getDocs(staffQ);
-            if (!staffSnap.empty) {
-              setRole("staff");
-              setRoles(["staff"]);
-            } else {
-              setRole("admin");
-              setRoles(["admin"]);
-            }
+    // Load existing session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        fetchUserProfile(session.user.id, session.user.email ?? "");
+      } else {
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          await fetchUserProfile(session.user.id, session.user.email ?? "");
+        } else {
+          setUser(null);
+          setRole(null);
+          setRoles([]);
+          setUsername(null);
+          setLoading(false);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function fetchUserProfile(uid: string, email: string) {
+    try {
+      let { data } = await supabase
+        .from("admin_users")
+        .select("role, roles, secondary_roles, username")
+        .eq("id", uid)
+        .single();
+
+      if (!data && email) {
+        const res = await supabase
+          .from("admin_users")
+          .select("role, roles, secondary_roles, username")
+          .eq("email", email.trim().toLowerCase())
+          .single();
+        data = res.data;
+      }
+
+      if (data) {
+        // Support both legacy `role` string and new `roles` array
+        const rolesArr: UserRole[] = Array.isArray(data.roles) && data.roles.length > 0
+          ? (data.roles as UserRole[])
+          : [(data.role as UserRole) || "admin"];
+        // Also merge secondary_roles (e.g. teacher who is also librarian)
+        if (Array.isArray(data.secondary_roles)) {
+          for (const r of data.secondary_roles as UserRole[]) {
+            if (!rolesArr.includes(r)) rolesArr.push(r);
           }
-        } catch (err) {
-          console.warn("Failed to fetch user role:", err);
+        }
+        setRoles(rolesArr);
+        setRole(rolesArr[0]);
+        setUsername(data.username || null);
+      } else {
+        // Check staff table as fallback
+        const { data: staffData } = await supabase
+          .from("staff")
+          .select("id")
+          .eq("E_Mail", email.toLowerCase())
+          .limit(1)
+          .single();
+        if (staffData) {
+          setRole("staff");
+          setRoles(["staff"]);
+        } else {
           setRole("admin");
           setRoles(["admin"]);
         }
-      } else {
-        setUser(null);
-        setRole(null);
-        setRoles([]);
-        setUsername(null);
       }
-      setLoading(false);
-    });
-
-    return unsubscribe;
-  }, []);
+    } catch (err) {
+      console.warn("Failed to fetch user role:", err);
+      setRole("admin");
+      setRoles(["admin"]);
+    }
+    setLoading(false);
+  }
 
   const signIn = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    await supabase.auth.signOut();
   };
 
   return (
