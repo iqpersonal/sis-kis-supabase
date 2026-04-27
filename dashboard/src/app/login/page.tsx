@@ -116,15 +116,7 @@ function LoginForm() {
 
       const email = data.email || identifier.trim().toLowerCase();
       await signIn(email, password);
-
-      const { getFirebaseAuth } = await import("@/lib/firebase");
-      const idToken = await getFirebaseAuth().currentUser?.getIdToken();
-      if (!idToken) {
-        setError("Failed to start session");
-        return;
-      }
-
-      document.cookie = `__session=${idToken}; path=/; max-age=${60 * 60}; SameSite=Lax; Secure`;
+      // __session cookie is set automatically by auth-context after Supabase sign-in
 
       if (data.teacher && data.target.startsWith("/teacher/dashboard")) {
         localStorage.setItem("teacher_session", JSON.stringify(data.teacher));

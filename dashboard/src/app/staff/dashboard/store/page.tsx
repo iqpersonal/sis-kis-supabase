@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useStaffAuth } from "@/context/staff-auth-context";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import {
   Card,
   CardContent,
@@ -63,7 +63,8 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 async function getToken() {
-  return getFirebaseAuth().currentUser?.getIdToken() ?? null;
+  const { data: { session } } = await getSupabase().auth.getSession();
+  return session?.access_token ?? null;
 }
 
 export default function StaffStorePage() {

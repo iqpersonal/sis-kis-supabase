@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
   const difficulty = req.nextUrl.searchParams.get("difficulty");
   const classCode = req.nextUrl.searchParams.get("class");
   const createdBy = req.nextUrl.searchParams.get("createdBy");
-  const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "200"), 500);
+  const year = req.nextUrl.searchParams.get("year");
+  const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") || "200"), 2000);
   const supabase = createServiceClient();
 
   try {
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
     if (subject) q = q.eq("subject", subject);
     if (difficulty) q = q.eq("difficulty", parseInt(difficulty));
     if (classCode) q = q.eq("class_code", classCode);
+    if (year) q = q.eq("year", year);
     if (createdBy) {
       const variants = [createdBy];
       if (!createdBy.includes("@")) variants.push(`${createdBy}@kis-riyadh.com`);

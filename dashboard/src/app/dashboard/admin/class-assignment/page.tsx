@@ -31,7 +31,7 @@ import {
   ChevronDown,
   X,
 } from "lucide-react";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import type { Role } from "@/lib/rbac";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
@@ -140,7 +140,8 @@ export default function ClassAssignmentPage() {
   const isSuperAdmin = can("admin.users");
 
   async function getAuthHeaders() {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session } } = await getSupabase().auth.getSession();
+    const token = session?.access_token;
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",

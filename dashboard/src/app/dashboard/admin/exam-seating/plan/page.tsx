@@ -21,7 +21,7 @@ import {
   Users,
   AlertTriangle,
 } from "lucide-react";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ── Types ──────────────────────────────────────────────────── */
 interface Schedule {
@@ -104,7 +104,8 @@ export default function ExamSeatingPlanPage() {
   const printRef = useRef<HTMLDivElement>(null);
 
   async function getAuthHeaders() {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session } } = await getSupabase().auth.getSession();
+    const token = session?.access_token;
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",

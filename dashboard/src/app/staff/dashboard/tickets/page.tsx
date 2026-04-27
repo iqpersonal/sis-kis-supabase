@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useStaffAuth } from "@/context/staff-auth-context";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import {
   Card,
   CardContent,
@@ -52,8 +52,8 @@ const PRIORITIES = [
 ];
 
 async function getToken() {
-  const auth = getFirebaseAuth();
-  return auth.currentUser?.getIdToken() ?? null;
+  const { data: { session } } = await getSupabase().auth.getSession();
+  return session?.access_token ?? null;
 }
 
 export default function StaffTicketsPage() {

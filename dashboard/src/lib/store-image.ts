@@ -1,5 +1,4 @@
-import { getFirebaseStorage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { createServiceClient } from "@/lib/supabase-server";
 
 /**
  * Storage paths:
@@ -7,14 +6,16 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage
  *   store-images/{storeType}/{itemDocId}/custom     — User-uploaded photo
  */
 
+const BUCKET = "store-images";
+
 type ImageSlot = "catalog" | "custom";
 
 function storagePath(storeType: string, itemDocId: string, slot: ImageSlot) {
-  return `store-images/${storeType}/${itemDocId}/${slot}`;
+  return `${storeType}/${itemDocId}/${slot}`;
 }
 
 /**
- * Upload a file (Blob/File from web) to Firebase Storage.
+ * Upload a file (Blob/File from web) to Supabase Storage.
  * Returns the public download URL.
  */
 export async function uploadStoreImage(
@@ -23,11 +24,12 @@ export async function uploadStoreImage(
   slot: ImageSlot,
   file: Blob | File,
 ): Promise<string> {
-  const storage = getFirebaseStorage();
+  const supabase = createServiceClient();
   const path = storagePath(storeType, itemDocId, slot);
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, file);
-  return getDownloadURL(storageRef);
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
 }
 
 /**
@@ -47,21 +49,15 @@ export async function uploadStoreImageFromUrl(
 }
 
 /**
- * Delete an image from Firebase Storage.
+ * Delete an image from Supabase Storage.
  */
 export async function deleteStoreImage(
   storeType: string,
   itemDocId: string,
   slot: ImageSlot,
 ): Promise<void> {
-  const storage = getFirebaseStorage();
+  const supabase = createServiceClient();
   const path = storagePath(storeType, itemDocId, slot);
-  const storageRef = ref(storage, path);
-  try {
-    await deleteObject(storageRef);
-  } catch (e: unknown) {
-    // Ignore "object-not-found" — already deleted
-    if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "storage/object-not-found") return;
-    throw e;
-  }
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error && !error.message.includes("Not Found")) throw error;
 }

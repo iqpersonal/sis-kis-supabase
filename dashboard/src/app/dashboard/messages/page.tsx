@@ -22,16 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/context/auth-context";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useSchoolFilter } from "@/context/school-filter-context";
-import {
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  where,
-  limit,
-  Timestamp,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import { useClassNames } from "@/hooks/use-classes";
 
 /* ─── Types ─── */
@@ -104,22 +95,25 @@ export default function MessagesPage() {
     (async () => {
       setLoadingSections(true);
       try {
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", selectedYear || "25-26"),
-          where("Major_Code", "==", school)
-        );
-        const snap = await getDocs(q);
+        const supabase = getSupabase();
+        const yr = selectedYear || "25-26";
+        const { data: secRows } = await supabase
+          .from("sections")
+          .select("Class_Code,class_code,Section_Code,section_code,Major_Code,major_code,E_Section_Name,e_section_name")
+          .limit(2000)
+          .or(`Academic_Year.eq.${yr},academic_year.eq.${yr}`)
+          .or(`Major_Code.eq.${school},major_code.eq.${school}`);
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          const classCode = String(data.Class_Code || "");
-          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
+        (secRows || []).forEach((d) => {
+          const row = d as Record<string, unknown>;
+          const classCode = String(row.Class_Code || row.class_code || "");
+          const sectionCode = String(row.Section_Code || row.section_code || "");
+          if (classCode && sectionCode && !EXCLUDED_CLASS_CODES.has(classCode)) {
             items.push({
               classCode,
-              sectionCode: String(data.Section_Code),
-              sectionName: String(data.E_Section_Name || data.Section_Code),
+              sectionCode,
+              sectionName: String(row.E_Section_Name || row.e_section_name || sectionCode),
             });
           }
         });
@@ -213,19 +207,23 @@ export default function MessagesPage() {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const q = query(collection(getDb(), "messages"), orderBy("created_at", "desc"), limit(100));
-      const snap = await getDocs(q);
-      const msgs: Message[] = snap.docs.map((d) => {
-        const data = d.data();
+      const supabase = getSupabase();
+      const { data: rows } = await supabase
+        .from("messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      const msgs: Message[] = (rows || []).map((d) => {
+        const row = d as Record<string, unknown>;
         return {
-          id: d.id,
-          title: data.title || "",
-          body: data.body || "",
-          sender: data.sender || "",
-          audience: data.audience || "all",
-          audience_filter: data.audience_filter || {},
-          created_at: data.created_at instanceof Timestamp ? data.created_at.toDate() : null,
-          read_count: (data.read_by || []).length,
+          id: String(row.id || ""),
+          title: String(row.title || ""),
+          body: String(row.body || ""),
+          sender: String(row.sender || ""),
+          audience: String(row.audience || "all"),
+          audience_filter: (row.audience_filter as Record<string, string>) || {},
+          created_at: row.created_at ? new Date(String(row.created_at)) : null,
+          read_count: Array.isArray(row.read_by) ? (row.read_by as unknown[]).length : 0,
         };
       });
       setMessages(msgs);

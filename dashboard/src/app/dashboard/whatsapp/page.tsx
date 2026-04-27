@@ -25,16 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/context/auth-context";
 import { useAcademicYear } from "@/context/academic-year-context";
-import {
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  where,
-  limit,
-  Timestamp,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import { useClassNames } from "@/hooks/use-classes";
 
 /* ─── Types ─── */
@@ -225,22 +216,27 @@ export default function WhatsAppPage() {
     (async () => {
       setLoadingSections(true);
       try {
-        const q = query(
-          collection(getDb(), "sections"),
-          where("Academic_Year", "==", selectedYear || "25-26"),
-          where("Major_Code", "==", school)
-        );
-        const snap = await getDocs(q);
+        const supabase = getSupabase();
+        let secQuery = supabase
+          .from("sections")
+          .select("Class_Code,class_code,Section_Code,section_code,Major_Code,major_code,E_Section_Name,e_section_name,Academic_Year,academic_year")
+          .limit(2000);
+        const yr = selectedYear || "25-26";
+        secQuery = secQuery.or(`Academic_Year.eq.${yr},academic_year.eq.${yr}`);
+        const { data: secRows } = await secQuery;
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          const classCode = String(data.Class_Code || "");
-          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
+        (secRows || []).forEach((d) => {
+          const row = d as Record<string, unknown>;
+          const majorCode = String(row.Major_Code || row.major_code || "");
+          if (majorCode !== school) return;
+          const classCode = String(row.Class_Code || row.class_code || "");
+          const sectionCode = String(row.Section_Code || row.section_code || "");
+          if (classCode && sectionCode && !EXCLUDED_CLASS_CODES.has(classCode)) {
             items.push({
               classCode,
-              sectionCode: String(data.Section_Code),
-              sectionName: String(data.E_Section_Name || data.Section_Code),
+              sectionCode,
+              sectionName: String(row.E_Section_Name || row.e_section_name || sectionCode),
             });
           }
         });
@@ -326,22 +322,26 @@ export default function WhatsAppPage() {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const q = query(collection(getDb(), "whatsapp_messages"), orderBy("created_at", "desc"), limit(100));
-      const snap = await getDocs(q);
-      const msgs: WhatsAppMessage[] = snap.docs.map((d) => {
-        const data = d.data();
+      const supabase = getSupabase();
+      const { data: rows } = await supabase
+        .from("whatsapp_messages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      const msgs: WhatsAppMessage[] = (rows || []).map((d) => {
+        const row = d as Record<string, unknown>;
         return {
-          id: d.id,
-          mode: data.mode || "template",
-          templateName: data.templateName || null,
-          text: data.text || null,
-          audience: data.audience || "all",
-          audience_filter: data.audience_filter || {},
-          sender: data.sender || "",
-          total_recipients: data.total_recipients || 0,
-          sent: data.sent || 0,
-          failed: data.failed || 0,
-          created_at: data.created_at instanceof Timestamp ? data.created_at.toDate() : null,
+          id: String(row.id || ""),
+          mode: String(row.mode || "template"),
+          templateName: row.templateName != null ? String(row.templateName) : null,
+          text: row.text != null ? String(row.text) : null,
+          audience: String(row.audience || "all"),
+          audience_filter: (row.audience_filter as Record<string, string>) || {},
+          sender: String(row.sender || ""),
+          total_recipients: Number(row.total_recipients) || 0,
+          sent: Number(row.sent) || 0,
+          failed: Number(row.failed) || 0,
+          created_at: row.created_at ? new Date(String(row.created_at)) : null,
         };
       });
       setMessages(msgs);
@@ -490,18 +490,23 @@ export default function WhatsAppPage() {
     setCuFamilyLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const snap = await getDocs(query(collection(getDb(), "families"), where("family_number", "==", fn), limit(1)));
-        if (snap.empty) { setCuFamilyInfo(null); } else {
-          const d = snap.docs[0].data();
+        const supabase = getSupabase();
+        const { data: famRows } = await supabase
+          .from("families")
+          .select("family_number,father_name,family_name,father_phone,mother_phone,father_email,mother_email,children")
+          .eq("family_number", fn)
+          .limit(1);
+        if (!famRows || famRows.length === 0) { setCuFamilyInfo(null); } else {
+          const d = famRows[0] as Record<string, unknown>;
           setCuFamilyInfo({
-            family_number: d.family_number,
-            father_name: d.father_name || "",
-            family_name: d.family_name || "",
-            father_phone: d.father_phone || "",
-            mother_phone: d.mother_phone || "",
-            father_email: d.father_email || "",
-            mother_email: d.mother_email || "",
-            children: d.children || [],
+            family_number: String(d.family_number || ""),
+            father_name: String(d.father_name || ""),
+            family_name: String(d.family_name || ""),
+            father_phone: String(d.father_phone || ""),
+            mother_phone: String(d.mother_phone || ""),
+            father_email: String(d.father_email || ""),
+            mother_email: String(d.mother_email || ""),
+            children: Array.isArray(d.children) ? d.children : [],
           });
         }
       } catch { setCuFamilyInfo(null); }
@@ -545,10 +550,13 @@ export default function WhatsAppPage() {
   const loadContactUpdateLog = useCallback(async () => {
     setCuLogLoading(true);
     try {
-      const snap = await getDocs(
-        query(collection(getDb(), "contact_updates"), orderBy("submitted_at", "desc"), limit(50))
-      );
-      setCuLog(snap.docs.map((d) => ({ id: d.id, ...d.data() } as { id: string; family_number: string; changed_fields: string[]; submitted_at: string })));
+      const supabase = getSupabase();
+      const { data: logRows } = await supabase
+        .from("contact_updates")
+        .select("id,family_number,changed_fields,submitted_at")
+        .order("submitted_at", { ascending: false })
+        .limit(50);
+      setCuLog((logRows || []) as { id: string; family_number: string; changed_fields: string[]; submitted_at: string }[]);
     } catch (err) {
       console.error("Failed to load contact update log:", err);
     } finally {

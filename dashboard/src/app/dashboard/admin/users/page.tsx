@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Shield, Trash2, UserPlus, Upload, FileSpreadsheet, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import { useAcademicYear } from "@/context/academic-year-context";
 
 interface AdminUser {
@@ -144,7 +144,8 @@ export default function UserManagementPage() {
   const isSuperAdmin = role === "super_admin";
 
   async function getAuthHeaders() {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session } } = await getSupabase().auth.getSession();
+    const token = session?.access_token;
     return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   }
 

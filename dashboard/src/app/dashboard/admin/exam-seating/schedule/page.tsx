@@ -30,7 +30,7 @@ import {
   Pencil,
   X,
 } from "lucide-react";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ── Types ──────────────────────────────────────────────────── */
 interface ExamDay {
@@ -76,7 +76,8 @@ export default function ExamSchedulePage() {
   const [saving, setSaving] = useState(false);
 
   async function getAuthHeaders() {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session } } = await getSupabase().auth.getSession();
+    const token = session?.access_token;
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",

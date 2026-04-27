@@ -21,9 +21,8 @@ import {
 import { Search, Filter, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/language-context";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import { compareAlphabeticalNames } from "@/lib/name-sort";
-import { collection, query, where, getDocs, limit } from "firebase/firestore";
 import { exportToCSV } from "@/lib/export-csv";
 
 type DocRecord = Record<string, unknown> & { id: string };
@@ -53,31 +52,26 @@ export default function StudentsPage() {
     let cancelled = false;
     (async () => {
       try {
-        let q;
-        if (school) {
-          q = query(
-            collection(getDb(), "sections"),
-            where("Academic_Year", "==", selectedYear || "25-26"),
-            where("Major_Code", "==", school)
-          );
-        } else {
-          q = query(
-            collection(getDb(), "sections"),
-            where("Academic_Year", "==", selectedYear || "25-26"),
-            limit(2000)
-          );
-        }
-        const snap = await getDocs(q);
+        const supabase = getSupabase();
+        const yr = selectedYear || "25-26";
+        let secQuery = supabase
+          .from("sections")
+          .select("Class_Code,class_code,Section_Code,section_code,Major_Code,major_code,E_Section_Name,e_section_name,Academic_Year,academic_year")
+          .limit(2000)
+          .or(`Academic_Year.eq.${yr},academic_year.eq.${yr}`);
+        if (school) secQuery = secQuery.or(`Major_Code.eq.${school},major_code.eq.${school}`);
+        const { data: secRows } = await secQuery;
         if (cancelled) return;
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          const classCode = String(data.Class_Code || "");
-          if (classCode && data.Section_Code && !EXCLUDED_CLASS_CODES.has(classCode)) {
+        (secRows || []).forEach((d) => {
+          const row = d as Record<string, unknown>;
+          const classCode = String(row.Class_Code || row.class_code || "");
+          const sectionCode = String(row.Section_Code || row.section_code || "");
+          if (classCode && sectionCode && !EXCLUDED_CLASS_CODES.has(classCode)) {
             items.push({
               classCode,
-              sectionCode: String(data.Section_Code),
-              sectionName: String(data.E_Section_Name || data.Section_Code),
+              sectionCode,
+              sectionName: String(row.E_Section_Name || row.e_section_name || sectionCode),
             });
           }
         });

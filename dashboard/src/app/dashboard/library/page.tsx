@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { getSupabase } from "@/lib/supabase";
 import {
   Card,
   CardContent,
@@ -67,7 +67,7 @@ import Image from "next/image";
 import { useAcademicYear } from "@/context/academic-year-context";
 import { useClassNames } from "@/hooks/use-classes";
 import { useAuth } from "@/context/auth-context";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -2125,24 +2125,26 @@ function CheckoutDialog({
 
     void (async () => {
       try {
-        const constraints = [where("Academic_Year", "==", selectedYear)];
-        if (assignedMajor) {
-          constraints.push(where("Major_Code", "==", assignedMajor));
-        }
-
-        const snap = await getDocs(query(collection(getDb(), "sections"), ...constraints));
+        const supabase = getSupabase();
+        let secQuery = supabase
+          .from("sections")
+          .select("Class_Code,class_code,Section_Code,section_code,E_Section_Name,e_section_name,Academic_Year,academic_year,Major_Code,major_code")
+          .limit(2000)
+          .or(`Academic_Year.eq.${selectedYear},academic_year.eq.${selectedYear}`);
+        if (assignedMajor) secQuery = secQuery.or(`Major_Code.eq.${assignedMajor},major_code.eq.${assignedMajor}`);
+        const { data: secRows } = await secQuery;
         if (cancelled) return;
 
         const items: { classCode: string; sectionCode: string; sectionName: string }[] = [];
-        snap.docs.forEach((doc) => {
-          const data = doc.data();
-          const classCode = String(data.Class_Code || "");
-          const sectionCode = String(data.Section_Code || "");
+        (secRows || []).forEach((d) => {
+          const row = d as Record<string, unknown>;
+          const classCode = String(row.Class_Code || row.class_code || "");
+          const sectionCode = String(row.Section_Code || row.section_code || "");
           if (!classCode || !sectionCode) return;
           items.push({
             classCode,
             sectionCode,
-            sectionName: String(data.E_Section_Name || data.Section_Code),
+            sectionName: String(row.E_Section_Name || row.e_section_name || sectionCode),
           });
         });
 

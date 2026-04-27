@@ -2,8 +2,7 @@
 
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ------------------------------------------------------------------ */
 /*  Types (mirrors progress page)                                     */
@@ -124,12 +123,16 @@ function StudentReportPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const hasPrinted = useRef(false);
 
-  // Detect admin session (Firebase Auth = admin; parents use custom auth)
+  // Detect admin session (Supabase = admin; parents use custom auth)
   useEffect(() => {
-    const unsub = onAuthStateChanged(getFirebaseAuth(), (user) => {
-      setIsAdmin(!!user);
+    const supabase = getSupabase();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAdmin(!!session?.user);
     });
-    return unsub;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdmin(!!session?.user);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {

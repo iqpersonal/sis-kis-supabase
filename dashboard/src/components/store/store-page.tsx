@@ -23,7 +23,7 @@ import {
 import type { StoreItem, StoreRequest, StoreTransaction, StoreRequestItem, DeliveryNote } from "@/types/sis";
 import type { StoreConfig } from "@/lib/store-config";
 import { useAuth } from "@/context/auth-context";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import { exportToCSV } from "@/lib/export-csv";
 import { uploadStoreImage, uploadStoreImageFromUrl, deleteStoreImage } from "@/lib/store-image";
 import LabelGenerator from "@/components/store/label-generator";
@@ -214,7 +214,8 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
   const postAction = async (action: string, payload: Record<string, unknown>) => {
     setSaving(true);
     try {
-      const token = await getFirebaseAuth().currentUser?.getIdToken();
+      const { data: { session } } = await getSupabase().auth.getSession();
+      const token = session?.access_token;
       const res = await fetch(apiBase, {
         method: "POST",
         headers: {
@@ -485,7 +486,8 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
   };
 
   const handleQuickIssue = async () => {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session: sess1 } } = await getSupabase().auth.getSession();
+    const token = sess1?.access_token;
     setSaving(true);
     try {
       const res = await fetch("/api/delivery-notes", {
@@ -524,7 +526,8 @@ export default function StorePage({ storeConfig: cfg, apiBase }: StorePageProps)
   };
 
   const handleAcknowledge = async (dnId: string) => {
-    const token = await getFirebaseAuth().currentUser?.getIdToken();
+    const { data: { session: sess2 } } = await getSupabase().auth.getSession();
+    const token = sess2?.access_token;
     setSaving(true);
     try {
       await fetch("/api/delivery-notes", {

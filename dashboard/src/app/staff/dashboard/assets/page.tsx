@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useStaffAuth } from "@/context/staff-auth-context";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 import {
   Card,
   CardContent,
@@ -42,8 +42,8 @@ export default function StaffAssetsPage() {
 
     async function load() {
       try {
-        const auth = getFirebaseAuth();
-        const token = await auth.currentUser?.getIdToken();
+        const { data: { session } } = await getSupabase().auth.getSession();
+        const token = session?.access_token;
         if (!token) return;
 
         const res = await fetch("/api/staff-portal/assets", {

@@ -15,14 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import {
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  limit,
-} from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ─── Types ─── */
 interface ContactUpdate {
@@ -62,22 +55,25 @@ export default function ContactUpdatesPage() {
   const loadUpdates = useCallback(async () => {
     setLoading(true);
     try {
-      const q = query(
-        collection(getDb(), "contact_updates"),
-        orderBy("submitted_at", "desc"),
-        limit(maxResults)
-      );
-      const snap = await getDocs(q);
-      const items: ContactUpdate[] = snap.docs.map((d) => ({
-        id: d.id,
-        family_number: d.data().family_number || "",
-        token: d.data().token || "",
-        old_values: d.data().old_values || {},
-        new_values: d.data().new_values || {},
-        changed_fields: d.data().changed_fields || [],
-        submitted_at: d.data().submitted_at || "",
-        verified_phone: d.data().verified_phone ?? true,
-      }));
+      const supabase = getSupabase();
+      const { data: rows } = await supabase
+        .from("contact_updates")
+        .select("id,family_number,token,old_values,new_values,changed_fields,submitted_at,verified_phone")
+        .order("submitted_at", { ascending: false })
+        .limit(maxResults);
+      const items: ContactUpdate[] = (rows || []).map((d) => {
+        const row = d as Record<string, unknown>;
+        return {
+          id: String(row.id || ""),
+          family_number: String(row.family_number || ""),
+          token: String(row.token || ""),
+          old_values: (row.old_values as Record<string, string>) || {},
+          new_values: (row.new_values as Record<string, string>) || {},
+          changed_fields: Array.isArray(row.changed_fields) ? row.changed_fields as string[] : [],
+          submitted_at: String(row.submitted_at || ""),
+          verified_phone: row.verified_phone !== false,
+        };
+      });
       setUpdates(items);
     } catch (err) {
       console.error("Failed to load contact updates:", err);

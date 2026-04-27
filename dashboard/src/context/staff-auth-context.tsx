@@ -8,13 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import {
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-  type User,
-} from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 export interface StaffProfile {
   uid: string;
@@ -49,8 +43,7 @@ const StaffAuthContext = createContext<StaffAuthCtx>({
   signOut: () => {},
 });
 
-async function fetchStaffProfile(user: User): Promise<StaffProfile | null> {
-  const token = await user.getIdToken();
+async function fetchStaffProfile(token: string): Promise<StaffProfile | null> {
   const res = await fetch("/api/staff-portal/profile", {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -69,23 +62,22 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     // Try localStorage first for instant UI
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setStaff(JSON.parse(stored) as StaffProfile);
-      }
+      if (stored) setStaff(JSON.parse(stored) as StaffProfile);
     } catch {
       // ignore
     }
 
-    const auth = getFirebaseAuth();
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    const supabase = getSupabase();
+
+    // Load initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user && session.access_token) {
         try {
-          const profile = await fetchStaffProfile(user);
+          const profile = await fetchStaffProfile(session.access_token);
           if (profile) {
             setStaff(profile);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
           } else {
-            // Authenticated but not a staff member
             setStaff(null);
             localStorage.removeItem(STORAGE_KEY);
           }
@@ -99,7 +91,27 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    return () => unsub();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user && session.access_token) {
+        try {
+          const profile = await fetchStaffProfile(session.access_token);
+          if (profile) {
+            setStaff(profile);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+          } else {
+            setStaff(null);
+            localStorage.removeItem(STORAGE_KEY);
+          }
+        } catch {
+          // keep cached profile if fetch fails
+        }
+      } else {
+        setStaff(null);
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -107,13 +119,22 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
 
     try {
-      const auth = getFirebaseAuth();
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const profile = await fetchStaffProfile(cred.user);
+      const supabase = getSupabase();
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError || !data.session) {
+        setError(
+          (signInError?.message || "").includes("Invalid")
+            ? "Invalid email or password"
+            : (signInError?.message || "Authentication failed")
+        );
+        setLoading(false);
+        return false;
+      }
 
+      const profile = await fetchStaffProfile(data.session.access_token);
       if (!profile) {
         setError("No staff profile found for this email.");
-        await firebaseSignOut(auth);
+        await supabase.auth.signOut();
         setLoading(false);
         return false;
       }
@@ -121,19 +142,14 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       setStaff(profile);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
 
-      // Set cookie so middleware can detect session
-      document.cookie = `__session=staff; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
+      // Set __session cookie so middleware can detect session
+      document.cookie = `__session=${data.session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
 
       setLoading(false);
       return true;
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Authentication failed";
-      setError(
-        msg.includes("auth/invalid-credential")
-          ? "Invalid email or password"
-          : msg
-      );
+      const msg = err instanceof Error ? err.message : "Authentication failed";
+      setError(msg);
       setLoading(false);
       return false;
     }
@@ -144,7 +160,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(STORAGE_KEY);
     document.cookie = "__session=; path=/; max-age=0";
     try {
-      await firebaseSignOut(getFirebaseAuth());
+      await getSupabase().auth.signOut();
     } catch {
       // ignore
     }

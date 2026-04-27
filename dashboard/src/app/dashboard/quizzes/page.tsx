@@ -28,8 +28,7 @@ import {
   HelpCircle, ClipboardList, Users, BarChart3, Loader2,
   Trophy, Clock, FileText, Plus, XCircle,
 } from "lucide-react";
-import { collection, getDocs, query, where, doc, getDoc, limit } from "firebase/firestore";
-import { getDb } from "@/lib/firebase";
+import { getSupabase } from "@/lib/supabase";
 
 /* ─── Types ──────────────────────────────────────────────────── */
 
@@ -151,11 +150,13 @@ export default function QuizzesPage() {
     if (!user?.uid || !isTeacher) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(getDb(), "admin_users", user.uid));
-        if (snap.exists()) {
-          const data = snap.data();
-          setAssignedClasses(data.assigned_classes || []);
-        }
+        const supabase = getSupabase();
+        const { data } = await supabase
+          .from("admin_users")
+          .select("assigned_classes")
+          .eq("id", user.uid)
+          .maybeSingle();
+        if (data) setAssignedClasses((data as Record<string, unknown>).assigned_classes as AssignedClass[] || []);
       } catch {
         // ignore
       }
@@ -167,39 +168,35 @@ export default function QuizzesPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const fireDb = getDb();
       const targetYear = selectedYear || "25-26";
 
-      // Fetch assignments — teacher sees only their own
-      const aSnap = await getDocs(
-        query(collection(fireDb, "quiz_assignments"), where("year", "==", targetYear), limit(500))
-      );
-      let aData = aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Assignment));
-      if (isTeacher && userEmail) {
-        aData = aData.filter((a) => a.created_by === userEmail);
-      }
+      // Fetch assignments
+      const aParams = new URLSearchParams({ year: targetYear, limit: "500" });
+      if (isTeacher && userEmail) aParams.set("teacher", userEmail);
+      const aRes = await fetch(`/api/quiz/assignments?${aParams}`);
+      const aJson = await aRes.json();
+      let aData: Assignment[] = (aJson.assignments || []) as Assignment[];
       if (schoolFilter !== "all") {
         aData = aData.filter((a) => !a.sis_school || a.sis_school === schoolFilter);
       }
       setAssignments(aData);
 
-      // Fetch question count — teacher sees only questions they created
-      const qQuery = isTeacher && userEmail
-        ? query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), where("created_by", "==", userEmail), limit(2000))
-        : query(collection(fireDb, "quiz_questions"), where("year", "==", targetYear), limit(2000));
-      const qSnap = await getDocs(qQuery);
-      setQuestions(qSnap.size);
+      // Fetch question count
+      const qParams = new URLSearchParams({ year: targetYear, limit: "2000" });
+      if (isTeacher && userEmail) qParams.set("createdBy", userEmail);
+      const qRes = await fetch(`/api/quiz/questions?${qParams}`);
+      const qJson = await qRes.json();
+      setQuestions((qJson.questions || []).length);
 
-      // Fetch results — teacher sees only results from their assignments
-      const rSnap = await getDocs(
-        query(collection(fireDb, "quiz_results"), where("year", "==", targetYear), limit(2000))
-      );
-      let rData = rSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Result));
-      if (isTeacher && userEmail) {
-        const myAssignmentIds = new Set(aData.map((a) => a.id));
-        rData = rData.filter((r) => myAssignmentIds.has(r.assignment_id));
+      // Fetch results scoped to loaded assignments
+      const assignmentIds = aData.map((a) => a.id).filter(Boolean);
+      if (assignmentIds.length > 0) {
+        const rRes = await fetch(`/api/quiz/results?year=${targetYear}&assignments=${assignmentIds.join(",")}`);
+        const rJson = await rRes.json();
+        setResults((rJson.results || []) as Result[]);
+      } else {
+        setResults([]);
       }
-      setResults(rData);
     } catch (err) {
       console.error("Failed to load quiz data:", err);
     } finally {
@@ -219,26 +216,21 @@ export default function QuizzesPage() {
     setQuestionsLoading(true);
     (async () => {
       try {
-        const fireDb = getDb();
-        const qSnap = await getDocs(
-          query(
-            collection(fireDb, "quiz_questions"),
-            where("year", "==", selectedYear || "25-26"),
-            where("class_code", "==", createBandCode),
-            limit(500),
-          )
-        );
+        const params = new URLSearchParams({
+          class: createBandCode,
+          year: selectedYear || "25-26",
+          limit: "500",
+        });
+        const res = await fetch(`/api/quiz/questions?${params}`);
+        const json = await res.json();
         setAvailableQuestions(
-          qSnap.docs.map((d) => {
-            const data = d.data();
-            return {
-              id: d.id,
-              text: data.text || "",
-              subject: data.subject || "",
-              class_code: data.class_code || "",
-              difficulty: data.difficulty || 3,
-            };
-          })
+          (json.questions || []).map((q: Record<string, unknown>) => ({
+            id: String(q.id || ""),
+            text: String(q.text || ""),
+            subject: String(q.subject || ""),
+            class_code: String(q.class_code || ""),
+            difficulty: Number(q.difficulty) || 3,
+          }))
         );
       } catch {
         setAvailableQuestions([]);
@@ -289,12 +281,17 @@ export default function QuizzesPage() {
         );
         if (matchedClass?.classId) {
           try {
-            const secDoc = await getDoc(doc(getDb(), "sections", matchedClass.classId));
-            if (secDoc.exists()) {
-              const secData = secDoc.data();
-              sisClassCode = secData.Class_Code || "";
-              sisSectionCode = createSection === "all" ? "" : (secData.Section_Code || "");
-              sisSchool = secData.Major_Code || "";
+            const supabase = getSupabase();
+            const { data: secData } = await supabase
+              .from("sections")
+              .select("Class_Code,class_code,Section_Code,section_code,Major_Code,major_code")
+              .eq("id", matchedClass.classId)
+              .maybeSingle();
+            if (secData) {
+              const s = secData as Record<string, unknown>;
+              sisClassCode = String(s.Class_Code || s.class_code || "");
+              sisSectionCode = createSection === "all" ? "" : String(s.Section_Code || s.section_code || "");
+              sisSchool = String(s.Major_Code || s.major_code || "");
             }
           } catch {
             // If section lookup fails, still allow creation
